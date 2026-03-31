@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths } from "date-fns";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, isToday } from "date-fns";
 import { pt } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, Plus, Trash2, CalendarDays, List, Clock, Package } from "lucide-react";
 import { useStore } from "@/store/useStore";
-import { INEFFICIENCY_FACTOR } from "@/store/types";
+import { INEFFICIENCY_FACTOR, WORKING_CODES, BREAK_COEFFICIENT } from "@/store/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -28,6 +28,32 @@ export default function Planeamento() {
       if (cat) mins += p.quantidade * cat.tempoCicloHomem;
     });
     return (mins / 60) * INEFFICIENCY_FACTOR;
+  };
+
+  const getDayCapacidade = (dateStr: string) => {
+    const ops = store.getOperatorsForDate(dateStr);
+    const presentOps = ops.filter((o) => WORKING_CODES.includes(o.code) && !o.absent);
+    const temps = store.tempOperators.filter((t) => t.date === dateStr);
+    const pessoasPresentes = presentOps.length + temps.length;
+    return pessoasPresentes * 7.5 * (1 - BREAK_COEFFICIENT);
+  };
+
+  const getTaxaOcupacao = (dateStr: string) => {
+    const carga = getDayCarga(dateStr);
+    const cap = getDayCapacidade(dateStr);
+    return cap > 0 ? (carga / cap) * 100 : 0;
+  };
+
+  const taxaColor = (rate: number) => {
+    if (rate > 100) return "bg-destructive text-destructive-foreground";
+    if (rate >= 80) return "bg-warning text-warning-foreground";
+    return "bg-success text-success-foreground";
+  };
+
+  const taxaTextColor = (rate: number) => {
+    if (rate > 100) return "text-danger";
+    if (rate >= 80) return "text-warning";
+    return "text-success";
   };
 
   const selectedProd = selectedDate ? store.production.filter((p) => p.date === selectedDate) : [];
@@ -149,20 +175,33 @@ export default function Planeamento() {
             const dateStr = format(day, "yyyy-MM-dd");
             const count = store.production.filter((p) => p.date === dateStr).length;
             const carga = getDayCarga(dateStr);
+            const cap = getDayCapacidade(dateStr);
+            const taxa = getTaxaOcupacao(dateStr);
             const isSelected = selectedDate === dateStr;
+            const isTodayDate = isToday(day);
+            const hasItems = count > 0;
+
             return (
               <button
                 key={dateStr}
                 onClick={() => setSelectedDate(dateStr)}
-                className={`p-2 rounded-lg text-left min-h-[80px] transition-colors border ${
-                  isSelected ? "border-primary bg-accent" : "border-transparent hover:bg-muted"
-                }`}
+                className={`p-1.5 rounded-lg text-left min-h-[90px] transition-colors border-2 ${
+                  isTodayDate ? "border-secondary" : isSelected ? "border-primary" : "border-transparent"
+                } ${hasItems ? "bg-primary/15" : "hover:bg-muted"}`}
               >
-                <div className="text-sm font-medium">{format(day, "d")}</div>
-                {count > 0 && (
-                  <div className="mt-1 space-y-0.5">
-                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{count} itens</Badge>
-                    <div className="text-[10px] text-muted-foreground">{carga.toFixed(1)}h</div>
+                <div className={`text-sm font-medium ${isTodayDate ? "text-secondary font-bold" : ""}`}>{format(day, "d")}</div>
+                {hasItems && (
+                  <div className="mt-0.5 space-y-0.5">
+                    <Badge variant="default" className="text-[9px] px-1 py-0 h-4 font-bold">{count}</Badge>
+                    <div className="text-[9px] text-muted-foreground leading-tight">{carga.toFixed(1)}h carga</div>
+                    {cap > 0 && (
+                      <>
+                        <div className="text-[9px] text-muted-foreground leading-tight">{cap.toFixed(1)}h cap.</div>
+                        <span className={`inline-block text-[8px] px-1 py-0 rounded-full font-bold ${taxaColor(taxa)}`}>
+                          {taxa.toFixed(0)}%
+                        </span>
+                      </>
+                    )}
                   </div>
                 )}
               </button>
@@ -170,7 +209,7 @@ export default function Planeamento() {
           })}
         </div>
       ) : (
-        /* Redesigned list view - grouped by day */
+        /* List view - grouped by day with capacity indicators */
         <div className="space-y-4">
           {groupedByDate.size === 0 ? (
             <Card>
@@ -181,6 +220,8 @@ export default function Planeamento() {
           ) : (
             Array.from(groupedByDate.entries()).map(([dateStr, items]) => {
               const carga = getDayCarga(dateStr);
+              const cap = getDayCapacidade(dateStr);
+              const taxa = cap > 0 ? (carga / cap) * 100 : 0;
               return (
                 <div key={dateStr} className="rounded-lg border overflow-hidden bg-card">
                   {/* Day header */}
@@ -191,6 +232,14 @@ export default function Planeamento() {
                     <div className="flex items-center gap-3 text-secondary-foreground/80 text-xs">
                       <span className="flex items-center gap-1"><Package className="h-3 w-3" />{items.length} itens</span>
                       <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{carga.toFixed(1)}h carga</span>
+                      {cap > 0 && (
+                        <>
+                          <span>{cap.toFixed(1)}h cap.</span>
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${taxaColor(taxa)}`}>
+                            {taxa.toFixed(0)}% ocup.
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                   {/* Day table */}
