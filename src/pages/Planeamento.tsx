@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths } from "date-fns";
 import { pt } from "date-fns/locale";
-import { ChevronLeft, ChevronRight, Plus, Trash2, CalendarDays, List } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Trash2, CalendarDays, List, Clock, Package } from "lucide-react";
 import { useStore } from "@/store/useStore";
+import { INEFFICIENCY_FACTOR } from "@/store/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -27,12 +27,11 @@ export default function Planeamento() {
       const cat = store.categories.find((c) => c.id === p.categoriaId);
       if (cat) mins += p.quantidade * cat.tempoCicloHomem;
     });
-    return mins / 60;
+    return (mins / 60) * INEFFICIENCY_FACTOR;
   };
 
   const selectedProd = selectedDate ? store.production.filter((p) => p.date === selectedDate) : [];
 
-  // Inline row editing state
   const [rows, setRows] = useState<{ id?: string; artigo: string; quantidade: string; unidade: string; categoriaId: string }[]>([]);
 
   useEffect(() => {
@@ -55,8 +54,6 @@ export default function Planeamento() {
   const updateRow = (idx: number, field: string, value: string) => {
     const newRows = [...rows];
     const row = { ...newRows[idx], [field]: value };
-
-    // Auto-suggest category from artigo history
     if (field === "artigo" && value.trim()) {
       const suggestedCat = store.getArtigoCategory(value);
       if (suggestedCat && !row.categoriaId) {
@@ -65,25 +62,20 @@ export default function Planeamento() {
         if (cat) row.unidade = cat.unidade;
       }
     }
-
-    // Auto-fill unidade from category
     if (field === "categoriaId" && value) {
       const cat = store.categories.find((c) => c.id === value);
       if (cat) row.unidade = cat.unidade;
     }
-
     newRows[idx] = row;
     setRows(newRows);
   };
 
   const saveAll = () => {
     if (!selectedDate) return;
-    // Delete removed rows
     const existingIds = rows.filter((r) => r.id).map((r) => r.id!);
     selectedProd.forEach((p) => {
       if (!existingIds.includes(p.id)) store.deleteProduction(p.id);
     });
-    // Update or add rows
     rows.forEach((r) => {
       if (!r.artigo.trim() || !r.categoriaId) return;
       const data = {
@@ -108,8 +100,13 @@ export default function Planeamento() {
     setRows(rows.filter((_, i) => i !== idx));
   };
 
-  // List view: all production sorted by date
+  // List view: group production by date
   const allProduction = [...store.production].sort((a, b) => a.date.localeCompare(b.date));
+  const groupedByDate = new Map<string, typeof allProduction>();
+  allProduction.forEach((p) => {
+    if (!groupedByDate.has(p.date)) groupedByDate.set(p.date, []);
+    groupedByDate.get(p.date)!.push(p);
+  });
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -117,18 +114,10 @@ export default function Planeamento() {
         <h1 className="text-2xl font-display font-bold">Planeamento</h1>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
-            <Button
-              variant={viewMode === "calendar" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setViewMode("calendar")}
-            >
+            <Button variant={viewMode === "calendar" ? "default" : "ghost"} size="sm" onClick={() => setViewMode("calendar")}>
               <CalendarDays className="h-4 w-4 mr-1" /> Calendário
             </Button>
-            <Button
-              variant={viewMode === "list" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setViewMode("list")}
-            >
+            <Button variant={viewMode === "list" ? "default" : "ghost"} size="sm" onClick={() => setViewMode("list")}>
               <List className="h-4 w-4 mr-1" /> Lista
             </Button>
           </div>
@@ -149,81 +138,103 @@ export default function Planeamento() {
       </div>
 
       {viewMode === "calendar" ? (
-        <>
-          {/* Calendar grid */}
-          <div className="grid grid-cols-7 gap-1">
-            {["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((d) => (
-              <div key={d} className="text-center text-xs font-semibold text-muted-foreground py-2">{d}</div>
-            ))}
-            {Array.from({ length: (days[0].getDay() + 6) % 7 }).map((_, i) => (
-              <div key={`empty-${i}`} />
-            ))}
-            {days.map((day) => {
-              const dateStr = format(day, "yyyy-MM-dd");
-              const count = store.production.filter((p) => p.date === dateStr).length;
-              const carga = getDayCarga(dateStr);
-              const isSelected = selectedDate === dateStr;
-              return (
-                <button
-                  key={dateStr}
-                  onClick={() => setSelectedDate(dateStr)}
-                  className={`p-2 rounded-lg text-left min-h-[80px] transition-colors border ${
-                    isSelected ? "border-primary bg-accent" : "border-transparent hover:bg-muted"
-                  }`}
-                >
-                  <div className="text-sm font-medium">{format(day, "d")}</div>
-                  {count > 0 && (
-                    <div className="mt-1 space-y-0.5">
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{count} itens</Badge>
-                      <div className="text-[10px] text-muted-foreground">{carga.toFixed(1)}h</div>
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </>
+        <div className="grid grid-cols-7 gap-1">
+          {["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((d) => (
+            <div key={d} className="text-center text-xs font-semibold text-muted-foreground py-2">{d}</div>
+          ))}
+          {Array.from({ length: (days[0].getDay() + 6) % 7 }).map((_, i) => (
+            <div key={`empty-${i}`} />
+          ))}
+          {days.map((day) => {
+            const dateStr = format(day, "yyyy-MM-dd");
+            const count = store.production.filter((p) => p.date === dateStr).length;
+            const carga = getDayCarga(dateStr);
+            const isSelected = selectedDate === dateStr;
+            return (
+              <button
+                key={dateStr}
+                onClick={() => setSelectedDate(dateStr)}
+                className={`p-2 rounded-lg text-left min-h-[80px] transition-colors border ${
+                  isSelected ? "border-primary bg-accent" : "border-transparent hover:bg-muted"
+                }`}
+              >
+                <div className="text-sm font-medium">{format(day, "d")}</div>
+                {count > 0 && (
+                  <div className="mt-1 space-y-0.5">
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{count} itens</Badge>
+                    <div className="text-[10px] text-muted-foreground">{carga.toFixed(1)}h</div>
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
       ) : (
-        /* List view */
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-display">Todas as Entradas Planeadas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {allProduction.length === 0 ? (
-              <p className="text-muted-foreground text-sm text-center py-4">Sem entradas planeadas.</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Data</TableHead>
-                    <TableHead>Artigo</TableHead>
-                    <TableHead className="text-right">QD</TableHead>
-                    <TableHead>Unidade</TableHead>
-                    <TableHead>Categoria</TableHead>
-                    <TableHead className="w-[60px]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {allProduction.map((p) => (
-                    <TableRow key={p.id}>
-                      <TableCell>{format(new Date(p.date + "T12:00"), "dd/MM/yyyy")}</TableCell>
-                      <TableCell className="font-medium">{p.artigo}</TableCell>
-                      <TableCell className="text-right">{p.quantidade}</TableCell>
-                      <TableCell>{p.unidade || "-"}</TableCell>
-                      <TableCell>{store.categories.find((c) => c.id === p.categoriaId)?.nome || "-"}</TableCell>
-                      <TableCell>
-                        <Button variant="ghost" size="sm" onClick={() => store.deleteProduction(p.id)}>
-                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+        /* Redesigned list view - grouped by day */
+        <div className="space-y-4">
+          {groupedByDate.size === 0 ? (
+            <Card>
+              <CardContent className="py-8">
+                <p className="text-muted-foreground text-sm text-center">Sem entradas planeadas.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            Array.from(groupedByDate.entries()).map(([dateStr, items]) => {
+              const carga = getDayCarga(dateStr);
+              return (
+                <div key={dateStr} className="rounded-lg border overflow-hidden bg-card">
+                  {/* Day header */}
+                  <div className="bg-secondary px-4 py-2.5 flex items-center justify-between">
+                    <span className="text-secondary-foreground font-display font-semibold text-sm capitalize">
+                      {format(new Date(dateStr + "T12:00"), "EEEE, d 'de' MMMM yyyy", { locale: pt })}
+                    </span>
+                    <div className="flex items-center gap-3 text-secondary-foreground/80 text-xs">
+                      <span className="flex items-center gap-1"><Package className="h-3 w-3" />{items.length} itens</span>
+                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{carga.toFixed(1)}h carga</span>
+                    </div>
+                  </div>
+                  {/* Day table */}
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-xs text-muted-foreground">
+                        <th className="text-left font-medium px-4 py-1.5">Artigo</th>
+                        <th className="text-right font-medium px-3 py-1.5">QD</th>
+                        <th className="text-left font-medium px-3 py-1.5">Unid.</th>
+                        <th className="text-left font-medium px-3 py-1.5">Categoria</th>
+                        <th className="text-left font-medium px-3 py-1.5">Equipamento</th>
+                        <th className="text-right font-medium px-3 py-1.5">T. Homem</th>
+                        <th className="text-right font-medium px-4 py-1.5">T. Máquina</th>
+                        <th className="px-2 py-1.5 w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((p, idx) => {
+                        const cat = store.categories.find((c) => c.id === p.categoriaId);
+                        const eq = cat ? store.equipment.find((e) => e.id === cat.equipamentoId) : null;
+                        return (
+                          <tr key={p.id} className={`border-b last:border-b-0 ${idx % 2 === 1 ? "bg-muted/30" : ""}`}>
+                            <td className="px-4 py-1.5 font-medium">{p.artigo}</td>
+                            <td className="px-3 py-1.5 text-right">{p.quantidade}</td>
+                            <td className="px-3 py-1.5">{p.unidade || "-"}</td>
+                            <td className="px-3 py-1.5">{cat?.nome || "-"}</td>
+                            <td className="px-3 py-1.5">{eq?.nome || "-"}</td>
+                            <td className="px-3 py-1.5 text-right">{cat ? `${p.quantidade * cat.tempoCicloHomem} min` : "-"}</td>
+                            <td className="px-4 py-1.5 text-right">{cat ? `${p.quantidade * cat.tempoCicloMaquina} min` : "-"}</td>
+                            <td className="px-2 py-1.5">
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => store.deleteProduction(p.id)}>
+                                <Trash2 className="h-3 w-3 text-destructive" />
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })
+          )}
+        </div>
       )}
 
       {/* Day detail dialog */}
@@ -253,7 +264,6 @@ export default function Planeamento() {
                         value={row.artigo}
                         onChange={(e) => updateRow(idx, "artigo", e.target.value)}
                         onBlur={() => {
-                          // Auto-suggest on blur
                           if (row.artigo.trim() && !row.categoriaId) {
                             const cat = store.getArtigoCategory(row.artigo);
                             if (cat) updateRow(idx, "categoriaId", cat);
@@ -264,20 +274,10 @@ export default function Planeamento() {
                       />
                     </TableCell>
                     <TableCell>
-                      <Input
-                        type="number"
-                        value={row.quantidade}
-                        onChange={(e) => updateRow(idx, "quantidade", e.target.value)}
-                        className="h-8"
-                      />
+                      <Input type="number" value={row.quantidade} onChange={(e) => updateRow(idx, "quantidade", e.target.value)} className="h-8" />
                     </TableCell>
                     <TableCell>
-                      <Input
-                        value={row.unidade}
-                        onChange={(e) => updateRow(idx, "unidade", e.target.value)}
-                        placeholder="kg"
-                        className="h-8"
-                      />
+                      <Input value={row.unidade} onChange={(e) => updateRow(idx, "unidade", e.target.value)} placeholder="kg" className="h-8" />
                     </TableCell>
                     <TableCell>
                       <Select value={row.categoriaId} onValueChange={(v) => updateRow(idx, "categoriaId", v)}>

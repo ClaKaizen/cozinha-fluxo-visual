@@ -4,7 +4,6 @@ import { useStore } from "@/store/useStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function Configuracoes() {
@@ -54,137 +53,142 @@ export default function Configuracoes() {
     setCatForm({ nome: "", equipamentoId: "", tempoCicloHomem: "", tempoCicloMaquina: "", unidade: "" });
   };
 
+  const inputCls = "h-7 text-xs";
+  const cellCls = "px-3 py-1";
+
   return (
     <div className="space-y-8 animate-fade-in">
       <h1 className="text-2xl font-display font-bold">Configurações</h1>
 
-      {/* Equipment */}
+      {/* Equipment - compact */}
       <Card>
-        <CardHeader>
+        <CardHeader className="pb-3">
           <CardTitle className="text-lg font-display">Equipamentos</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nome</TableHead>
-                <TableHead className="text-right">Quantidade</TableHead>
-                <TableHead className="w-[100px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-xs text-muted-foreground">
+                <th className={`text-left font-medium ${cellCls}`}>Nome</th>
+                <th className={`text-right font-medium ${cellCls}`}>Quantidade</th>
+                <th className={`${cellCls} w-[80px]`}></th>
+              </tr>
+            </thead>
+            <tbody>
               {store.equipment.map((eq) => (
-                <TableRow key={eq.id}>
+                <tr key={eq.id} className="border-b last:border-b-0 hover:bg-muted/30">
                   {editEq === eq.id ? (
                     <>
-                      <TableCell><Input value={eqForm.nome} onChange={(e) => setEqForm({ ...eqForm, nome: e.target.value })} className="h-8" /></TableCell>
-                      <TableCell><Input type="number" value={eqForm.quantidade} onChange={(e) => setEqForm({ ...eqForm, quantidade: e.target.value })} className="h-8 w-20 ml-auto" /></TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => handleSaveEq(eq.id)}><Save className="h-3.5 w-3.5" /></Button>
-                        <Button variant="ghost" size="sm" onClick={() => setEditEq(null)}><X className="h-3.5 w-3.5" /></Button>
-                      </TableCell>
+                      <td className={cellCls}><Input value={eqForm.nome} onChange={(e) => setEqForm({ ...eqForm, nome: e.target.value })} className={inputCls} /></td>
+                      <td className={cellCls}><Input type="number" value={eqForm.quantidade} onChange={(e) => setEqForm({ ...eqForm, quantidade: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
+                      <td className={`${cellCls} text-right`}>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleSaveEq(eq.id)}><Save className="h-3 w-3" /></Button>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setEditEq(null)}><X className="h-3 w-3" /></Button>
+                      </td>
                     </>
                   ) : (
                     <>
-                      <TableCell className="font-medium">{eq.nome}</TableCell>
-                      <TableCell className="text-right">{eq.quantidade}</TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => { setEditEq(eq.id); setEqForm({ nome: eq.nome, quantidade: String(eq.quantidade) }); }}>
-                          <Edit2 className="h-3.5 w-3.5" />
+                      <td className={`${cellCls} font-medium`}>{eq.nome}</td>
+                      <td className={`${cellCls} text-right`}>{eq.quantidade}</td>
+                      <td className={`${cellCls} text-right`}>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => { setEditEq(eq.id); setEqForm({ nome: eq.nome, quantidade: String(eq.quantidade) }); }}>
+                          <Edit2 className="h-3 w-3" />
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => store.deleteEquipment(eq.id)}>
-                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-1" onClick={() => store.deleteEquipment(eq.id)}>
+                          <Trash2 className="h-3 w-3 text-destructive" />
                         </Button>
-                      </TableCell>
+                      </td>
                     </>
                   )}
-                </TableRow>
+                </tr>
               ))}
-            </TableBody>
-          </Table>
-          <div className="flex gap-2 mt-4">
-            <Input placeholder="Nome do equipamento" value={editEq ? "" : eqForm.nome} onChange={(e) => !editEq && setEqForm({ ...eqForm, nome: e.target.value })} className="h-9" disabled={!!editEq} />
-            <Input placeholder="QD" type="number" value={editEq ? "" : eqForm.quantidade} onChange={(e) => !editEq && setEqForm({ ...eqForm, quantidade: e.target.value })} className="h-9 w-20" disabled={!!editEq} />
-            <Button onClick={handleAddEq} disabled={!!editEq} className="h-9"><Plus className="h-4 w-4 mr-1" /> Adicionar</Button>
+            </tbody>
+          </table>
+          <div className="flex gap-2 mt-3">
+            <Input placeholder="Nome do equipamento" value={editEq ? "" : eqForm.nome} onChange={(e) => !editEq && setEqForm({ ...eqForm, nome: e.target.value })} className="h-8 text-xs" disabled={!!editEq} />
+            <Input placeholder="QD" type="number" value={editEq ? "" : eqForm.quantidade} onChange={(e) => !editEq && setEqForm({ ...eqForm, quantidade: e.target.value })} className="h-8 text-xs w-16" disabled={!!editEq} />
+            <Button onClick={handleAddEq} disabled={!!editEq} size="sm" className="h-8 text-xs"><Plus className="h-3 w-3 mr-1" /> Adicionar</Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Categories */}
+      {/* Categories - compact */}
       <Card>
-        <CardHeader>
+        <CardHeader className="pb-3">
           <CardTitle className="text-lg font-display">Categorias & Tempos de Ciclo</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nome</TableHead>
-                <TableHead>Equipamento</TableHead>
-                <TableHead className="text-right">T. Homem (min)</TableHead>
-                <TableHead className="text-right">T. Máquina (min)</TableHead>
-                <TableHead>Unidade</TableHead>
-                <TableHead className="w-[100px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {store.categories.map((cat) => (
-                <TableRow key={cat.id}>
-                  {editCat === cat.id ? (
-                    <>
-                      <TableCell><Input value={catForm.nome} onChange={(e) => setCatForm({ ...catForm, nome: e.target.value })} className="h-8" /></TableCell>
-                      <TableCell>
-                        <Select value={catForm.equipamentoId} onValueChange={(v) => setCatForm({ ...catForm, equipamentoId: v })}>
-                          <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {store.equipment.map((eq) => <SelectItem key={eq.id} value={eq.id}>{eq.nome}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell><Input type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className="h-8 w-20 ml-auto" /></TableCell>
-                      <TableCell><Input type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className="h-8 w-20 ml-auto" /></TableCell>
-                      <TableCell><Input value={catForm.unidade} onChange={(e) => setCatForm({ ...catForm, unidade: e.target.value })} className="h-8 w-20" placeholder="kg" /></TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => handleSaveCat(cat.id)}><Save className="h-3.5 w-3.5" /></Button>
-                        <Button variant="ghost" size="sm" onClick={() => setEditCat(null)}><X className="h-3.5 w-3.5" /></Button>
-                      </TableCell>
-                    </>
-                  ) : (
-                    <>
-                      <TableCell className="font-medium">{cat.nome}</TableCell>
-                      <TableCell>{store.equipment.find((e) => e.id === cat.equipamentoId)?.nome || "-"}</TableCell>
-                      <TableCell className="text-right">{cat.tempoCicloHomem}</TableCell>
-                      <TableCell className="text-right">{cat.tempoCicloMaquina}</TableCell>
-                      <TableCell>{cat.unidade || "-"}</TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => {
-                          setEditCat(cat.id);
-                          setCatForm({ nome: cat.nome, equipamentoId: cat.equipamentoId, tempoCicloHomem: String(cat.tempoCicloHomem), tempoCicloMaquina: String(cat.tempoCicloMaquina), unidade: cat.unidade || "" });
-                        }}>
-                          <Edit2 className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => store.deleteCategory(cat.id)}>
-                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                        </Button>
-                      </TableCell>
-                    </>
-                  )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <div className="flex gap-2 mt-4 flex-wrap">
-            <Input placeholder="Nome da categoria" value={editCat ? "" : catForm.nome} onChange={(e) => !editCat && setCatForm({ ...catForm, nome: e.target.value })} className="h-9 flex-1 min-w-[150px]" disabled={!!editCat} />
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-xs text-muted-foreground">
+                  <th className={`text-left font-medium ${cellCls}`}>Nome</th>
+                  <th className={`text-left font-medium ${cellCls}`}>Equipamento</th>
+                  <th className={`text-right font-medium ${cellCls}`}>T. Homem</th>
+                  <th className={`text-right font-medium ${cellCls}`}>T. Máquina</th>
+                  <th className={`text-left font-medium ${cellCls}`}>Unidade</th>
+                  <th className={`${cellCls} w-[70px]`}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {store.categories.map((cat) => (
+                  <tr key={cat.id} className="border-b last:border-b-0 hover:bg-muted/30">
+                    {editCat === cat.id ? (
+                      <>
+                        <td className={cellCls}><Input value={catForm.nome} onChange={(e) => setCatForm({ ...catForm, nome: e.target.value })} className={inputCls} /></td>
+                        <td className={cellCls}>
+                          <Select value={catForm.equipamentoId} onValueChange={(v) => setCatForm({ ...catForm, equipamentoId: v })}>
+                            <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {store.equipment.map((eq) => <SelectItem key={eq.id} value={eq.id}>{eq.nome}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className={cellCls}><Input type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
+                        <td className={cellCls}><Input type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
+                        <td className={cellCls}><Input value={catForm.unidade} onChange={(e) => setCatForm({ ...catForm, unidade: e.target.value })} className={`${inputCls} w-16`} placeholder="kg" /></td>
+                        <td className={`${cellCls} text-right`}>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleSaveCat(cat.id)}><Save className="h-3 w-3" /></Button>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setEditCat(null)}><X className="h-3 w-3" /></Button>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className={`${cellCls} font-medium`}>{cat.nome}</td>
+                        <td className={cellCls}>{store.equipment.find((e) => e.id === cat.equipamentoId)?.nome || "-"}</td>
+                        <td className={`${cellCls} text-right`}>{cat.tempoCicloHomem} min</td>
+                        <td className={`${cellCls} text-right`}>{cat.tempoCicloMaquina} min</td>
+                        <td className={cellCls}>{cat.unidade || "-"}</td>
+                        <td className={`${cellCls} text-right`}>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => {
+                            setEditCat(cat.id);
+                            setCatForm({ nome: cat.nome, equipamentoId: cat.equipamentoId, tempoCicloHomem: String(cat.tempoCicloHomem), tempoCicloMaquina: String(cat.tempoCicloMaquina), unidade: cat.unidade || "" });
+                          }}>
+                            <Edit2 className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-1" onClick={() => store.deleteCategory(cat.id)}>
+                            <Trash2 className="h-3 w-3 text-destructive" />
+                          </Button>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex gap-2 mt-3 flex-wrap">
+            <Input placeholder="Nome da categoria" value={editCat ? "" : catForm.nome} onChange={(e) => !editCat && setCatForm({ ...catForm, nome: e.target.value })} className="h-8 text-xs flex-1 min-w-[120px]" disabled={!!editCat} />
             <Select value={editCat ? "" : catForm.equipamentoId} onValueChange={(v) => !editCat && setCatForm({ ...catForm, equipamentoId: v })} disabled={!!editCat}>
-              <SelectTrigger className="h-9 w-[150px]"><SelectValue placeholder="Equipamento" /></SelectTrigger>
+              <SelectTrigger className="h-8 text-xs w-[130px]"><SelectValue placeholder="Equipamento" /></SelectTrigger>
               <SelectContent>
                 {store.equipment.map((eq) => <SelectItem key={eq.id} value={eq.id}>{eq.nome}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Input placeholder="T. Homem" type="number" value={editCat ? "" : catForm.tempoCicloHomem} onChange={(e) => !editCat && setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className="h-9 w-24" disabled={!!editCat} />
-            <Input placeholder="T. Máquina" type="number" value={editCat ? "" : catForm.tempoCicloMaquina} onChange={(e) => !editCat && setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className="h-9 w-24" disabled={!!editCat} />
-            <Input placeholder="Unidade" value={editCat ? "" : catForm.unidade} onChange={(e) => !editCat && setCatForm({ ...catForm, unidade: e.target.value })} className="h-9 w-20" disabled={!!editCat} />
-            <Button onClick={handleAddCat} disabled={!!editCat} className="h-9"><Plus className="h-4 w-4 mr-1" /> Adicionar</Button>
+            <Input placeholder="T. Homem" type="number" value={editCat ? "" : catForm.tempoCicloHomem} onChange={(e) => !editCat && setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className="h-8 text-xs w-20" disabled={!!editCat} />
+            <Input placeholder="T. Máquina" type="number" value={editCat ? "" : catForm.tempoCicloMaquina} onChange={(e) => !editCat && setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className="h-8 text-xs w-20" disabled={!!editCat} />
+            <Input placeholder="Unid." value={editCat ? "" : catForm.unidade} onChange={(e) => !editCat && setCatForm({ ...catForm, unidade: e.target.value })} className="h-8 text-xs w-16" disabled={!!editCat} />
+            <Button onClick={handleAddCat} disabled={!!editCat} size="sm" className="h-8 text-xs"><Plus className="h-3 w-3 mr-1" /> Adicionar</Button>
           </div>
         </CardContent>
       </Card>
