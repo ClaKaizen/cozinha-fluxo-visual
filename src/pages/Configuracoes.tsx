@@ -10,12 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 export default function Configuracoes() {
   const store = useStore();
 
-  // Equipment form
   const [eqForm, setEqForm] = useState({ nome: "", quantidade: "" });
   const [editEq, setEditEq] = useState<string | null>(null);
 
-  // Category form
-  const [catForm, setCatForm] = useState({ nome: "", equipamentoId: "", tempoCicloHomem: "", tempoCicloMaquina: "" });
+  const [catForm, setCatForm] = useState({ nome: "", equipamentoId: "", tempoCicloHomem: "", tempoCicloMaquina: "", unidade: "" });
   const [editCat, setEditCat] = useState<string | null>(null);
 
   const handleAddEq = () => {
@@ -38,8 +36,9 @@ export default function Configuracoes() {
         equipamentoId: catForm.equipamentoId,
         tempoCicloHomem: Number(catForm.tempoCicloHomem) || 0,
         tempoCicloMaquina: Number(catForm.tempoCicloMaquina) || 0,
+        unidade: catForm.unidade.trim() || "unid",
       });
-      setCatForm({ nome: "", equipamentoId: "", tempoCicloHomem: "", tempoCicloMaquina: "" });
+      setCatForm({ nome: "", equipamentoId: "", tempoCicloHomem: "", tempoCicloMaquina: "", unidade: "" });
     }
   };
 
@@ -49,9 +48,10 @@ export default function Configuracoes() {
       equipamentoId: catForm.equipamentoId,
       tempoCicloHomem: Number(catForm.tempoCicloHomem) || 0,
       tempoCicloMaquina: Number(catForm.tempoCicloMaquina) || 0,
+      unidade: catForm.unidade.trim() || "unid",
     });
     setEditCat(null);
-    setCatForm({ nome: "", equipamentoId: "", tempoCicloHomem: "", tempoCicloMaquina: "" });
+    setCatForm({ nome: "", equipamentoId: "", tempoCicloHomem: "", tempoCicloMaquina: "", unidade: "" });
   };
 
   return (
@@ -123,6 +123,7 @@ export default function Configuracoes() {
                 <TableHead>Equipamento</TableHead>
                 <TableHead className="text-right">T. Homem (min)</TableHead>
                 <TableHead className="text-right">T. Máquina (min)</TableHead>
+                <TableHead>Unidade</TableHead>
                 <TableHead className="w-[100px]"></TableHead>
               </TableRow>
             </TableHeader>
@@ -142,6 +143,7 @@ export default function Configuracoes() {
                       </TableCell>
                       <TableCell><Input type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className="h-8 w-20 ml-auto" /></TableCell>
                       <TableCell><Input type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className="h-8 w-20 ml-auto" /></TableCell>
+                      <TableCell><Input value={catForm.unidade} onChange={(e) => setCatForm({ ...catForm, unidade: e.target.value })} className="h-8 w-20" placeholder="kg" /></TableCell>
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm" onClick={() => handleSaveCat(cat.id)}><Save className="h-3.5 w-3.5" /></Button>
                         <Button variant="ghost" size="sm" onClick={() => setEditCat(null)}><X className="h-3.5 w-3.5" /></Button>
@@ -153,10 +155,11 @@ export default function Configuracoes() {
                       <TableCell>{store.equipment.find((e) => e.id === cat.equipamentoId)?.nome || "-"}</TableCell>
                       <TableCell className="text-right">{cat.tempoCicloHomem}</TableCell>
                       <TableCell className="text-right">{cat.tempoCicloMaquina}</TableCell>
+                      <TableCell>{cat.unidade || "-"}</TableCell>
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm" onClick={() => {
                           setEditCat(cat.id);
-                          setCatForm({ nome: cat.nome, equipamentoId: cat.equipamentoId, tempoCicloHomem: String(cat.tempoCicloHomem), tempoCicloMaquina: String(cat.tempoCicloMaquina) });
+                          setCatForm({ nome: cat.nome, equipamentoId: cat.equipamentoId, tempoCicloHomem: String(cat.tempoCicloHomem), tempoCicloMaquina: String(cat.tempoCicloMaquina), unidade: cat.unidade || "" });
                         }}>
                           <Edit2 className="h-3.5 w-3.5" />
                         </Button>
@@ -180,6 +183,7 @@ export default function Configuracoes() {
             </Select>
             <Input placeholder="T. Homem" type="number" value={editCat ? "" : catForm.tempoCicloHomem} onChange={(e) => !editCat && setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className="h-9 w-24" disabled={!!editCat} />
             <Input placeholder="T. Máquina" type="number" value={editCat ? "" : catForm.tempoCicloMaquina} onChange={(e) => !editCat && setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className="h-9 w-24" disabled={!!editCat} />
+            <Input placeholder="Unidade" value={editCat ? "" : catForm.unidade} onChange={(e) => !editCat && setCatForm({ ...catForm, unidade: e.target.value })} className="h-9 w-20" disabled={!!editCat} />
             <Button onClick={handleAddCat} disabled={!!editCat} className="h-9"><Plus className="h-4 w-4 mr-1" /> Adicionar</Button>
           </div>
         </CardContent>

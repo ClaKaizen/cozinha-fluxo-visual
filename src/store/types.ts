@@ -10,6 +10,7 @@ export interface Category {
   equipamentoId: string;
   tempoCicloHomem: number; // minutes
   tempoCicloMaquina: number; // minutes
+  unidade: string; // e.g. kg, L, unid, dose
 }
 
 export interface ProductionEntry {
@@ -17,15 +18,16 @@ export interface ProductionEntry {
   date: string; // YYYY-MM-DD
   artigo: string;
   quantidade: number;
+  unidade: string;
   categoriaId: string;
 }
 
 export type ShiftCode = 'D' | 'E' | 'I' | 'FG' | 'F' | 'B' | 'RH' | 'K' | 'FD' | 'NT' | 'AN' | 'C';
 
 export const SHIFT_HOURS: Record<ShiftCode, number> = {
-  D: 9, // 07-16
-  E: 4, // 07-11
-  I: 9, // 08-17
+  D: 7.5,
+  E: 4,
+  I: 7.5,
   FG: 0,
   F: 0,
   B: 0,
@@ -34,10 +36,10 @@ export const SHIFT_HOURS: Record<ShiftCode, number> = {
   FD: 0,
   NT: 0,
   AN: 0,
-  C: 0, // support, not counted as kitchen
+  C: 7.5,
 };
 
-export const WORKING_CODES: ShiftCode[] = ['D', 'E', 'I'];
+export const WORKING_CODES: ShiftCode[] = ['D', 'E', 'I', 'C'];
 
 export interface Operator {
   id: string;
@@ -63,3 +65,4 @@ export interface TempOperator {
 }
 
 export const BREAK_COEFFICIENT = 0.0625; // 6.25%
+export const INEFFICIENCY_FACTOR = 1.20; // 20%

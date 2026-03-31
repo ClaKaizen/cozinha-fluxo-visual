@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
   Equipment, Category, ProductionEntry, Operator, ScheduleEntry,
-  DayAbsence, TempOperator, ShiftCode, SHIFT_HOURS, WORKING_CODES, BREAK_COEFFICIENT
+  DayAbsence, TempOperator, ShiftCode, SHIFT_HOURS, WORKING_CODES, BREAK_COEFFICIENT, INEFFICIENCY_FACTOR
 } from './types';
 
 interface AppState {
@@ -14,35 +14,28 @@ interface AppState {
   absences: DayAbsence[];
   tempOperators: TempOperator[];
 
-  // Equipment
   addEquipment: (e: Omit<Equipment, 'id'>) => void;
   updateEquipment: (id: string, e: Partial<Equipment>) => void;
   deleteEquipment: (id: string) => void;
 
-  // Categories
   addCategory: (c: Omit<Category, 'id'>) => void;
   updateCategory: (id: string, c: Partial<Category>) => void;
   deleteCategory: (id: string) => void;
 
-  // Production
   addProduction: (p: Omit<ProductionEntry, 'id'>) => void;
   updateProduction: (id: string, p: Partial<ProductionEntry>) => void;
   deleteProduction: (id: string) => void;
 
-  // Operators
   addOperator: (name: string) => void;
   deleteOperator: (id: string) => void;
 
-  // Schedule
   setSchedule: (operatorId: string, date: string, code: ShiftCode) => void;
 
-  // Day adjustments
   addAbsence: (operatorId: string, date: string) => void;
   removeAbsence: (operatorId: string, date: string) => void;
   addTempOperator: (t: Omit<TempOperator, 'id'>) => void;
   removeTempOperator: (id: string) => void;
 
-  // Computed helpers
   getProductionForDate: (date: string) => ProductionEntry[];
   getOperatorsForDate: (date: string) => { operator: Operator; code: ShiftCode; absent: boolean; hours: number }[];
   getDayStats: (date: string) => {
@@ -51,6 +44,7 @@ interface AppState {
     capacidadeDoDia: number;
     taxaOcupacao: { equipmentName: string; rate: number }[];
   };
+  getArtigoCategory: (artigo: string) => string | undefined;
 }
 
 const uid = () => crypto.randomUUID();
@@ -64,9 +58,9 @@ export const useStore = create<AppState>()(
         { id: 'eq3', nome: 'Panela', quantidade: 2 },
       ],
       categories: [
-        { id: 'cat1', nome: 'Molho Base Bechamel', equipamentoId: 'eq3', tempoCicloHomem: 15, tempoCicloMaquina: 45 },
-        { id: 'cat2', nome: 'Arroz Branco', equipamentoId: 'eq1', tempoCicloHomem: 10, tempoCicloMaquina: 30 },
-        { id: 'cat3', nome: 'Frango Assado', equipamentoId: 'eq2', tempoCicloHomem: 20, tempoCicloMaquina: 60 },
+        { id: 'cat1', nome: 'Molho Base Bechamel', equipamentoId: 'eq3', tempoCicloHomem: 15, tempoCicloMaquina: 45, unidade: 'kg' },
+        { id: 'cat2', nome: 'Arroz Branco', equipamentoId: 'eq1', tempoCicloHomem: 10, tempoCicloMaquina: 30, unidade: 'kg' },
+        { id: 'cat3', nome: 'Frango Assado', equipamentoId: 'eq2', tempoCicloHomem: 20, tempoCicloMaquina: 60, unidade: 'unid' },
       ],
       production: [],
       operators: [
@@ -135,21 +129,20 @@ export const useStore = create<AppState>()(
         const ops = state.getOperatorsForDate(date);
         const temps = state.tempOperators.filter((t) => t.date === date);
 
-        // Carga do dia (hours)
+        // Carga do dia (hours) with 20% inefficiency
         let cargaMinutes = 0;
         prod.forEach((p) => {
           const cat = state.categories.find((c) => c.id === p.categoriaId);
           if (cat) cargaMinutes += p.quantidade * cat.tempoCicloHomem;
         });
-        const cargaDoDia = cargaMinutes / 60;
+        const cargaDoDia = (cargaMinutes / 60) * INEFFICIENCY_FACTOR;
 
         // Pessoas presentes
         const presentOps = ops.filter((o) => o.hours > 0);
         const pessoasPresentes = presentOps.length + temps.length;
 
-        // Capacidade do dia
-        const totalHours = presentOps.reduce((sum, o) => sum + o.hours, 0) + temps.reduce((sum, t) => sum + t.hours, 0);
-        const capacidadeDoDia = totalHours * (1 - BREAK_COEFFICIENT);
+        // Capacidade do dia: people × 7.5h × (1 - 0.0625)
+        const capacidadeDoDia = pessoasPresentes * 7.5 * (1 - BREAK_COEFFICIENT);
 
         // Taxa de ocupação por equipamento
         const equipMap = new Map<string, { machineMinutes: number }>();
@@ -165,12 +158,19 @@ export const useStore = create<AppState>()(
         const taxaOcupacao = state.equipment.map((eq) => {
           const data = equipMap.get(eq.id);
           const totalMachineMinutes = data?.machineMinutes || 0;
-          const availableMinutes = eq.quantidade * 9 * 60; // 9h work day
+          const availableMinutes = eq.quantidade * 7.5 * 60;
           const rate = availableMinutes > 0 ? (totalMachineMinutes / availableMinutes) * 100 : 0;
           return { equipmentName: eq.nome, rate };
         });
 
         return { cargaDoDia, pessoasPresentes, capacidadeDoDia, taxaOcupacao };
+      },
+
+      // Find the most recent category used for an artigo name
+      getArtigoCategory: (artigo) => {
+        const { production } = get();
+        const match = [...production].reverse().find((p) => p.artigo.toLowerCase() === artigo.toLowerCase());
+        return match?.categoriaId;
       },
     }),
     { name: 'cla-catering-store' }
