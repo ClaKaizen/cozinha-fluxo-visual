@@ -67,10 +67,11 @@ export default function GanttChart({ dateStr }: GanttChartProps) {
     const ops = store.getOperatorsForDate(dateStr);
     const presentOps = ops.filter((o) => WORKING_CODES.includes(o.code) && !o.absent);
     const temps = store.tempOperators.filter((t) => t.date === dateStr);
-    const allOperators = [
-      ...presentOps.map((o) => o.operator.nome),
-      ...temps.map((t) => t.nome),
-    ];
+    // If no one has schedule codes set, treat all operators as available
+    const effectiveOps = presentOps.length > 0 || temps.length > 0
+      ? [...presentOps.map((o) => o.operator.nome), ...temps.map((t) => t.nome)]
+      : store.operators.map((o) => o.nome);
+    const allOperators = effectiveOps;
 
     const eqColorMap = new Map<string, number>();
     store.equipment.forEach((eq, idx) => eqColorMap.set(eq.id, idx % EQUIPMENT_COLORS.length));
