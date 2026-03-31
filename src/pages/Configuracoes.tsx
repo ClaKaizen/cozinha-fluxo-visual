@@ -1,10 +1,20 @@
 import { useState } from "react";
-import { Plus, Trash2, Edit2, Save, X } from "lucide-react";
+import { Plus, Trash2, Edit2, Save, X, Wrench, Tag, User, Cog } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+
+const EQUIPMENT_COLORS = [
+  "hsl(45, 90%, 60%)",
+  "hsl(210, 60%, 55%)",
+  "hsl(340, 60%, 55%)",
+  "hsl(160, 50%, 45%)",
+  "hsl(30, 70%, 55%)",
+  "hsl(270, 50%, 55%)",
+];
 
 export default function Configuracoes() {
   const store = useStore();
@@ -14,6 +24,9 @@ export default function Configuracoes() {
 
   const [catForm, setCatForm] = useState({ nome: "", equipamentoId: "", tempoCicloHomem: "", tempoCicloMaquina: "", unidade: "" });
   const [editCat, setEditCat] = useState<string | null>(null);
+
+  const eqColorMap = new Map<string, string>();
+  store.equipment.forEach((eq, idx) => eqColorMap.set(eq.id, EQUIPMENT_COLORS[idx % EQUIPMENT_COLORS.length]));
 
   const handleAddEq = () => {
     if (eqForm.nome.trim()) {
@@ -54,18 +67,19 @@ export default function Configuracoes() {
   };
 
   const inputCls = "h-7 text-xs";
-  const cellCls = "px-3 py-1";
+  const cellCls = "px-2 py-1";
 
   return (
     <div className="space-y-8 animate-fade-in">
       <h1 className="text-2xl font-display font-bold">Configurações</h1>
 
-      {/* Equipment - compact */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg font-display">Equipamentos</CardTitle>
-        </CardHeader>
-        <CardContent>
+      {/* Equipment */}
+      <Card className="overflow-hidden">
+        <div className="flex items-center gap-2 px-5 py-3 rounded-t-lg" style={{ backgroundColor: "hsl(215, 25%, 34%)" }}>
+          <Wrench className="h-4 w-4 text-white" />
+          <span className="text-white font-display font-semibold text-base">Equipamentos</span>
+        </div>
+        <CardContent className="pt-4">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-xs text-muted-foreground">
@@ -112,12 +126,13 @@ export default function Configuracoes() {
         </CardContent>
       </Card>
 
-      {/* Categories - compact */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg font-display">Categorias & Tempos de Ciclo</CardTitle>
-        </CardHeader>
-        <CardContent>
+      {/* Categories */}
+      <Card className="overflow-hidden">
+        <div className="flex items-center gap-2 px-5 py-3 rounded-t-lg" style={{ backgroundColor: "hsl(215, 25%, 34%)" }}>
+          <Tag className="h-4 w-4 text-white" />
+          <span className="text-white font-display font-semibold text-base">Categorias & Tempos de Ciclo</span>
+        </div>
+        <CardContent className="pt-4">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -131,49 +146,75 @@ export default function Configuracoes() {
                 </tr>
               </thead>
               <tbody>
-                {store.categories.map((cat) => (
-                  <tr key={cat.id} className="border-b last:border-b-0 hover:bg-muted/30">
-                    {editCat === cat.id ? (
-                      <>
-                        <td className={cellCls}><Input value={catForm.nome} onChange={(e) => setCatForm({ ...catForm, nome: e.target.value })} className={inputCls} /></td>
-                        <td className={cellCls}>
-                          <Select value={catForm.equipamentoId} onValueChange={(v) => setCatForm({ ...catForm, equipamentoId: v })}>
-                            <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {store.equipment.map((eq) => <SelectItem key={eq.id} value={eq.id}>{eq.nome}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </td>
-                        <td className={cellCls}><Input type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
-                        <td className={cellCls}><Input type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
-                        <td className={cellCls}><Input value={catForm.unidade} onChange={(e) => setCatForm({ ...catForm, unidade: e.target.value })} className={`${inputCls} w-16`} placeholder="kg" /></td>
-                        <td className={`${cellCls} text-right`}>
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleSaveCat(cat.id)}><Save className="h-3 w-3" /></Button>
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setEditCat(null)}><X className="h-3 w-3" /></Button>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className={`${cellCls} font-medium`}>{cat.nome}</td>
-                        <td className={cellCls}>{store.equipment.find((e) => e.id === cat.equipamentoId)?.nome || "-"}</td>
-                        <td className={`${cellCls} text-right`}>{cat.tempoCicloHomem} min</td>
-                        <td className={`${cellCls} text-right`}>{cat.tempoCicloMaquina} min</td>
-                        <td className={cellCls}>{cat.unidade || "-"}</td>
-                        <td className={`${cellCls} text-right`}>
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => {
-                            setEditCat(cat.id);
-                            setCatForm({ nome: cat.nome, equipamentoId: cat.equipamentoId, tempoCicloHomem: String(cat.tempoCicloHomem), tempoCicloMaquina: String(cat.tempoCicloMaquina), unidade: cat.unidade || "" });
-                          }}>
-                            <Edit2 className="h-3 w-3" />
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-1" onClick={() => store.deleteCategory(cat.id)}>
-                            <Trash2 className="h-3 w-3 text-destructive" />
-                          </Button>
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                ))}
+                {store.categories.map((cat) => {
+                  const eqColor = eqColorMap.get(cat.equipamentoId) || "hsl(var(--muted-foreground))";
+                  const eqName = store.equipment.find((e) => e.id === cat.equipamentoId)?.nome || "-";
+                  return (
+                    <tr key={cat.id} className="border-b last:border-b-0 hover:bg-muted/30" style={{ borderLeft: `3px solid ${eqColor}` }}>
+                      {editCat === cat.id ? (
+                        <>
+                          <td className={cellCls}><Input value={catForm.nome} onChange={(e) => setCatForm({ ...catForm, nome: e.target.value })} className={inputCls} /></td>
+                          <td className={cellCls}>
+                            <Select value={catForm.equipamentoId} onValueChange={(v) => setCatForm({ ...catForm, equipamentoId: v })}>
+                              <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {store.equipment.map((eq) => <SelectItem key={eq.id} value={eq.id}>{eq.nome}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </td>
+                          <td className={cellCls}><Input type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
+                          <td className={cellCls}><Input type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
+                          <td className={cellCls}><Input value={catForm.unidade} onChange={(e) => setCatForm({ ...catForm, unidade: e.target.value })} className={`${inputCls} w-16`} placeholder="kg" /></td>
+                          <td className={`${cellCls} text-right`}>
+                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleSaveCat(cat.id)}><Save className="h-3 w-3" /></Button>
+                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setEditCat(null)}><X className="h-3 w-3" /></Button>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className={`${cellCls} font-medium`}>{cat.nome}</td>
+                          <td className={cellCls}>
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] px-2 py-0 font-medium border"
+                              style={{ borderColor: eqColor, color: eqColor, backgroundColor: eqColor + "15" }}
+                            >
+                              {eqName}
+                            </Badge>
+                          </td>
+                          <td className={`${cellCls} text-right`}>
+                            <span className="inline-flex items-center gap-1">
+                              <User className="h-3 w-3 text-muted-foreground" />
+                              {cat.tempoCicloHomem} min
+                            </span>
+                          </td>
+                          <td className={`${cellCls} text-right`}>
+                            <span className="inline-flex items-center gap-1">
+                              <Cog className="h-3 w-3 text-muted-foreground" />
+                              {cat.tempoCicloMaquina} min
+                            </span>
+                          </td>
+                          <td className={cellCls}>
+                            <Badge variant="secondary" className="text-[10px] px-2 py-0 font-normal">
+                              {cat.unidade || "-"}
+                            </Badge>
+                          </td>
+                          <td className={`${cellCls} text-right`}>
+                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => {
+                              setEditCat(cat.id);
+                              setCatForm({ nome: cat.nome, equipamentoId: cat.equipamentoId, tempoCicloHomem: String(cat.tempoCicloHomem), tempoCicloMaquina: String(cat.tempoCicloMaquina), unidade: cat.unidade || "" });
+                            }}>
+                              <Edit2 className="h-3 w-3" />
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-1" onClick={() => store.deleteCategory(cat.id)}>
+                              <Trash2 className="h-3 w-3 text-destructive" />
+                            </Button>
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
