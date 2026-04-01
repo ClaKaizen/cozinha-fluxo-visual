@@ -96,7 +96,7 @@ export default function Dashboard() {
                 <Info className="h-4 w-4 text-muted-foreground" />
               </TooltipTrigger>
               <TooltipContent className="max-w-[260px] text-xs">
-                Σ (QD × T. Ciclo Homem) × 1.20 (fator de ineficiência 20%)
+                Inclui 20% ineficiência — baseado em tempo homem
               </TooltipContent>
             </Tooltip>
           </CardHeader>
