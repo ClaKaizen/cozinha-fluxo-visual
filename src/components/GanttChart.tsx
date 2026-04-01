@@ -1,380 +1,250 @@
 import { useMemo } from "react";
 import { useStore } from "@/store/useStore";
-import { WORKING_CODES } from "@/store/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  buildDailyGanttSchedule,
+  DAY_END,
+  DAY_START,
+  formatClock,
+  LUNCH_END,
+  LUNCH_START,
+  normalizeDateKey,
+  type GanttRow,
+  type MachineTask,
+  type OperatorTask,
+  type TimelineSegment,
+} from "@/components/gantt/scheduler";
 
-interface ScheduledTask {
-  id: string;
-  artigo: string;
-  equipmentName: string;
-  equipmentId: string;
-  machineIndex: number;
-  // Equipment slot (T.Homem + T.Máquina)
-  equipStart: number;
-  equipEnd: number;
-  // Operator slot (T.Homem only, at start of equip slot)
-  humanStart: number;
-  humanEnd: number;
-  // Machine slot (T.Máquina, after T.Homem)
-  machineStart: number;
-  machineEnd: number;
-  operatorName: string;
-  colorIndex: number;
-}
-
-const DAY_START = 7 * 60;
-const LUNCH_START = 13 * 60;
-const LUNCH_END = 14 * 60;
-const DAY_END = 15 * 60 + 30;
-
-const EQUIPMENT_COLORS = [
-  "hsl(45, 90%, 60%)",
-  "hsl(210, 60%, 55%)",
-  "hsl(340, 60%, 55%)",
-  "hsl(160, 50%, 45%)",
-  "hsl(30, 70%, 55%)",
-  "hsl(270, 50%, 55%)",
+const EQUIPMENT_COLOR_TOKENS = [
+  "--gantt-equipment-1",
+  "--gantt-equipment-2",
+  "--gantt-equipment-3",
+  "--gantt-equipment-4",
+  "--gantt-equipment-5",
+  "--gantt-equipment-6",
 ];
-
-function fmt(m: number): string {
-  const h = Math.floor(m / 60);
-  const min = m % 60;
-  return `${h.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
-}
-
-function nextStart(cursor: number, duration: number): number {
-  let t = cursor;
-  if (t < DAY_START) t = DAY_START;
-  if (t >= LUNCH_START && t < LUNCH_END) t = LUNCH_END;
-  if (t < LUNCH_START && t + duration > LUNCH_START) t = LUNCH_END;
-  return t;
-}
-
-function place(cursor: number, duration: number): { start: number; end: number } | null {
-  const start = nextStart(cursor, duration);
-  const end = start + duration;
-  if (end > DAY_END) return null;
-  return { start, end };
-}
 
 interface GanttChartProps {
   dateStr: string;
 }
 
-export default function GanttChart({ dateStr }: GanttChartProps) {
-  const store = useStore();
+function colorFill(index: number, overflow: boolean) {
+  const token = EQUIPMENT_COLOR_TOKENS[index % EQUIPMENT_COLOR_TOKENS.length];
+  return overflow ? `hsl(var(${token}) / 0.18)` : `hsl(var(${token}) / 0.36)`;
+}
 
-  const scheduled = useMemo(() => {
-    const production = store.production.filter((p) => p.date === dateStr);
-    if (production.length === 0) return { tasks: [] as ScheduledTask[], operators: [] as string[], machines: [] as string[] };
+function colorBorder(index: number, overflow: boolean) {
+  const token = EQUIPMENT_COLOR_TOKENS[index % EQUIPMENT_COLOR_TOKENS.length];
+  return overflow ? `hsl(var(${token}) / 0.55)` : `hsl(var(${token}) / 0.9)`;
+}
 
-    const ops = store.getOperatorsForDate(dateStr);
-    const presentOps = ops.filter((o) => WORKING_CODES.includes(o.code) && !o.absent);
-    const temps = store.tempOperators.filter((t) => t.date === dateStr);
-    const effectiveOps = presentOps.length > 0 || temps.length > 0
-      ? [...presentOps.map((o) => o.operator.nome), ...temps.map((t) => t.nome)]
-      : store.operators.map((o) => o.nome);
+function GanttSection<TTask extends { id: string; artigo: string; start: number; end: number; colorIndex: number; segments: TimelineSegment[] }>(props: {
+  title: string;
+  rows: GanttRow<TTask>[];
+  axisEnd: number;
+  emptyMessage: string;
+  legend: { id: string; label: string; colorIndex: number }[];
+}) {
+  const { title, rows, axisEnd, emptyMessage, legend } = props;
 
-    const eqColorMap = new Map<string, number>();
-    store.equipment.forEach((eq, idx) => eqColorMap.set(eq.id, idx % EQUIPMENT_COLORS.length));
-
-    // Step 1: Schedule tasks on equipment (T.Homem + T.Máquina = total equipment occupation)
-    const machineAvail = new Map<string, number[]>();
-    store.equipment.forEach((eq) => {
-      machineAvail.set(eq.id, Array(eq.quantidade).fill(DAY_START));
-    });
-
-    const enriched = production.map((p) => {
-      const cat = store.categories.find((c) => c.id === p.categoriaId);
-      const eq = cat ? store.equipment.find((e) => e.id === cat.equipamentoId) : null;
-      return { ...p, cat, eq };
-    }).sort((a, b) => (a.eq?.nome || "").localeCompare(b.eq?.nome || ""));
-
-    // First pass: determine equipment schedule
-    const equipSchedule: {
-      item: typeof enriched[0];
-      machineIdx: number;
-      equipStart: number;
-      equipEnd: number;
-      humanDuration: number;
-      machineDuration: number;
-    }[] = [];
-
-    for (const item of enriched) {
-      if (!item.cat || !item.eq) continue;
-      const humanDuration = item.quantidade * item.cat.tempoCicloHomem;
-      const machineDuration = item.quantidade * item.cat.tempoCicloMaquina;
-      const totalDuration = humanDuration + machineDuration;
-      if (totalDuration === 0) continue;
-
-      const machines = machineAvail.get(item.cat.equipamentoId);
-      if (!machines || machines.length === 0) continue;
-
-      // Find earliest available machine
-      let bestMachine = 0;
-      let bestTime = machines[0];
-      for (let i = 1; i < machines.length; i++) {
-        if (machines[i] < bestTime) {
-          bestTime = machines[i];
-          bestMachine = i;
-        }
-      }
-
-      const equipSlot = place(bestTime, totalDuration);
-      if (!equipSlot) continue;
-
-      machines[bestMachine] = equipSlot.end;
-      equipSchedule.push({
-        item,
-        machineIdx: bestMachine,
-        equipStart: equipSlot.start,
-        equipEnd: equipSlot.end,
-        humanDuration,
-        machineDuration,
-      });
-    }
-
-    // Step 2: Assign operators based on equipment schedule (T.Homem only)
-    const opAvail = new Map<string, number>();
-    effectiveOps.forEach((name) => opAvail.set(name, DAY_START));
-
-    const tasks: ScheduledTask[] = [];
-
-    // Sort by equipStart to assign operators in chronological order
-    equipSchedule.sort((a, b) => a.equipStart - b.equipStart);
-
-    for (const sched of equipSchedule) {
-      const { item, machineIdx, equipStart, equipEnd, humanDuration, machineDuration } = sched;
-      if (!item.cat || !item.eq) continue;
-
-      // Find earliest available operator that can start at or after equipStart
-      let bestOp = effectiveOps[0] || "?";
-      let bestOpStart = Infinity;
-      for (const [name, avail] of opAvail) {
-        const opStart = nextStart(Math.max(avail, equipStart), humanDuration);
-        if (opStart < bestOpStart) {
-          bestOpStart = opStart;
-          bestOp = name;
-        }
-      }
-
-      const humanSlot = place(bestOpStart, humanDuration);
-      if (!humanSlot) continue;
-
-      opAvail.set(bestOp, humanSlot.end);
-
-      tasks.push({
-        id: item.id,
-        artigo: item.artigo,
-        equipmentName: item.eq.nome,
-        equipmentId: item.cat.equipamentoId,
-        machineIndex: machineIdx,
-        equipStart,
-        equipEnd,
-        humanStart: humanSlot.start,
-        humanEnd: humanSlot.end,
-        machineStart: equipStart + humanDuration,
-        machineEnd: equipEnd,
-        operatorName: bestOp,
-        colorIndex: eqColorMap.get(item.cat.equipamentoId) || 0,
-      });
-    }
-
-    const machineRows: string[] = [];
-    store.equipment.forEach((eq) => {
-      for (let i = 0; i < eq.quantidade; i++) {
-        machineRows.push(`${eq.nome} ${i + 1}`);
-      }
-    });
-
-    return { tasks, operators: effectiveOps, machines: machineRows };
-  }, [dateStr, store]);
-
-  if (scheduled.tasks.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base font-display">Sugestão de Planeamento</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground text-sm text-center py-4">Sem tarefas para gerar planeamento.</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const TOTAL_SPAN = DAY_END - DAY_START;
-  const toPercent = (absMin: number) => ((absMin - DAY_START) / TOTAL_SPAN) * 100;
-
-  const timeMarkers: number[] = [];
-  for (let m = DAY_START; m <= DAY_END; m += 30) timeMarkers.push(m);
-
-  const rowH = 32;
-  const chartW = 700;
-  const labelW = 120;
-
-  // Build maps for each chart
-  const operatorTasks = new Map<string, ScheduledTask[]>();
-  scheduled.operators.forEach((name) => operatorTasks.set(name, []));
-  scheduled.tasks.forEach((t) => {
-    const list = operatorTasks.get(t.operatorName);
-    if (list) list.push(t);
-  });
-
-  const eqMachineOffset = new Map<string, number>();
-  let offset = 0;
-  store.equipment.forEach((eq) => {
-    eqMachineOffset.set(eq.id, offset);
-    offset += eq.quantidade;
-  });
-
-  // Equipment tasks (T.Homem + T.Máquina)
-  const equipTaskMap = new Map<string, ScheduledTask[]>();
-  scheduled.tasks.forEach((t) => {
-    const baseOffset = eqMachineOffset.get(t.equipmentId) || 0;
-    const label = scheduled.machines[baseOffset + t.machineIndex];
-    if (label) {
-      if (!equipTaskMap.has(label)) equipTaskMap.set(label, []);
-      equipTaskMap.get(label)!.push(t);
-    }
-  });
-  const usedEquipment = scheduled.machines.filter((m) => equipTaskMap.has(m));
-
-  // Machine tasks (T.Máquina only)
-  const machineTaskMap = new Map<string, ScheduledTask[]>();
-  scheduled.tasks.forEach((t) => {
-    if (t.machineStart >= t.machineEnd) return; // no machine time
-    const baseOffset = eqMachineOffset.get(t.equipmentId) || 0;
-    const label = scheduled.machines[baseOffset + t.machineIndex];
-    if (label) {
-      if (!machineTaskMap.has(label)) machineTaskMap.set(label, []);
-      machineTaskMap.get(label)!.push(t);
-    }
-  });
-  const usedMachines = scheduled.machines.filter((m) => machineTaskMap.has(m));
-
-  const renderBlock = (t: ScheduledTask, startMin: number, endMin: number, suffix: string, opacity: string) => {
-    const leftPct = toPercent(startMin);
-    const widthPct = ((endMin - startMin) / TOTAL_SPAN) * 100;
-    const blockW = (widthPct / 100) * chartW;
-    const showTime = blockW > 55;
-    return (
-      <div
-        key={t.id + suffix}
-        className="absolute rounded text-[8px] font-semibold text-foreground flex flex-col justify-center px-1.5 overflow-hidden whitespace-nowrap border"
-        style={{
-          left: `${leftPct}%`,
-          width: `${widthPct}%`,
-          top: 2,
-          height: rowH - 4,
-          backgroundColor: EQUIPMENT_COLORS[t.colorIndex] + opacity,
-          borderColor: EQUIPMENT_COLORS[t.colorIndex],
-        }}
-        title={`${t.artigo} (${t.equipmentName}) ${fmt(startMin)}–${fmt(endMin)}`}
-      >
-        <span className="truncate leading-tight">{t.artigo}</span>
-        {showTime && (
-          <span className="text-[7px] opacity-70 leading-tight">{fmt(startMin)}–{fmt(endMin)}</span>
-        )}
-      </div>
-    );
-  };
-
-  const renderTimeAxis = () => (
-    <div className="relative" style={{ marginLeft: labelW, height: 18 }}>
-      {timeMarkers.filter((m) => m % 60 === 0).map((m) => (
-        <div key={m} className="absolute text-[10px] font-medium text-muted-foreground" style={{ left: `${toPercent(m)}%`, transform: "translateX(-50%)" }}>
-          {fmt(m)}
-        </div>
-      ))}
-    </div>
-  );
-
-  const renderChartSection = (
-    title: string,
-    rows: { label: string; tasks: ScheduledTask[]; getStart: (t: ScheduledTask) => number; getEnd: (t: ScheduledTask) => number; suffix: string; opacity: string }[]
-  ) => {
-    if (rows.length === 0) return null;
-    const totalH = rows.length * rowH;
+  if (rows.length === 0) {
     return (
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-display">{title}</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <div style={{ minWidth: labelW + chartW + 20 }}>
-              {renderTimeAxis()}
-              <div className="relative">
-                <div className="absolute bg-muted/40 z-0 rounded" style={{
-                  left: labelW + (toPercent(LUNCH_START) / 100) * chartW,
-                  width: (((LUNCH_END - LUNCH_START) / TOTAL_SPAN) * chartW),
-                  top: 0, height: totalH,
-                }} />
-                {timeMarkers.map((m) => (
-                  <div key={m} className={`absolute z-0 ${m % 60 === 0 ? "border-l border-border/50" : "border-l border-border/20"}`}
-                    style={{ left: labelW + (toPercent(m) / 100) * chartW, top: 0, height: totalH }} />
-                ))}
-                {rows.map((row) => (
-                  <div key={row.label} className="flex items-center relative" style={{ height: rowH }}>
-                    <div className="text-[11px] truncate font-semibold pr-2" style={{ width: labelW }}>{row.label}</div>
-                    <div className="relative flex-1 h-full bg-muted/5 border-b border-border/20" style={{ width: chartW }}>
-                      {row.tasks.map((t) => renderBlock(t, row.getStart(t), row.getEnd(t), row.suffix, row.opacity))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="flex gap-3 mt-3 flex-wrap text-xs">
-                {store.equipment.map((eq, idx) => (
-                  <div key={eq.id} className="flex items-center gap-1.5">
-                    <div className="w-3 h-3 rounded-sm border" style={{ backgroundColor: EQUIPMENT_COLORS[idx % EQUIPMENT_COLORS.length] + "55", borderColor: EQUIPMENT_COLORS[idx % EQUIPMENT_COLORS.length] }} />
-                    <span>{eq.nome}</span>
-                  </div>
-                ))}
-                <div className="flex items-center gap-1.5">
-                  <div className="w-3 h-3 rounded-sm bg-muted" />
-                  <span className="text-muted-foreground">Almoço 13:00–14:00</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <p className="py-4 text-center text-sm text-muted-foreground">{emptyMessage}</p>
         </CardContent>
       </Card>
     );
-  };
+  }
 
-  const equipRows = usedEquipment.map((label) => ({
-    label,
-    tasks: equipTaskMap.get(label) || [],
-    getStart: (t: ScheduledTask) => t.equipStart,
-    getEnd: (t: ScheduledTask) => t.equipEnd,
-    suffix: "-eq",
-    opacity: "55",
-  }));
+  const labelWidth = 148;
+  const rowHeight = 42;
+  const pixelsPerMinute = 1.55;
+  const totalSpan = axisEnd - DAY_START;
+  const chartWidth = Math.max(760, totalSpan * pixelsPerMinute);
+  const toPercent = (minutes: number) => ((minutes - DAY_START) / totalSpan) * 100;
+  const markers = Array.from({ length: Math.floor((axisEnd - DAY_START) / 30) + 1 }, (_, index) => DAY_START + index * 30);
+  const lunchLeft = toPercent(LUNCH_START);
+  const lunchWidth = ((LUNCH_END - LUNCH_START) / totalSpan) * 100;
+  const totalHeight = rows.length * rowHeight;
 
-  const operatorRows = scheduled.operators.map((name) => ({
-    label: name,
-    tasks: operatorTasks.get(name) || [],
-    getStart: (t: ScheduledTask) => t.humanStart,
-    getEnd: (t: ScheduledTask) => t.humanEnd,
-    suffix: "-op",
-    opacity: "40",
-  }));
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base font-display">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <div style={{ minWidth: labelWidth + chartWidth + 24 }}>
+            <div className="relative mb-2" style={{ marginLeft: labelWidth, height: 18 }}>
+              {markers.filter((marker) => marker % 60 === 0).map((marker) => (
+                <div
+                  key={marker}
+                  className="absolute text-[10px] font-medium text-muted-foreground"
+                  style={{ left: `${toPercent(marker)}%`, transform: "translateX(-50%)" }}
+                >
+                  {formatClock(marker)}
+                </div>
+              ))}
+            </div>
+            <div className="relative">
+              <div
+                className="absolute z-0 rounded bg-muted/60"
+                style={{
+                  left: labelWidth + (lunchLeft / 100) * chartWidth,
+                  width: (lunchWidth / 100) * chartWidth,
+                  top: 0,
+                  height: totalHeight,
+                }}
+              />
+              {markers.map((marker) => (
+                <div
+                  key={marker}
+                  className={`absolute z-0 ${marker % 60 === 0 ? "border-l border-border/50" : "border-l border-border/25"}`}
+                  style={{ left: labelWidth + (toPercent(marker) / 100) * chartWidth, top: 0, height: totalHeight }}
+                />
+              ))}
+              {rows.map((row) => (
+                <div key={row.label} className="relative flex items-center" style={{ height: rowHeight }}>
+                  <div className="truncate pr-3 text-xs font-semibold text-foreground" style={{ width: labelWidth }}>
+                    {row.label}
+                  </div>
+                  <div className="relative h-full flex-1 border-b border-border/30 bg-muted/5" style={{ width: chartWidth }}>
+                    {row.tasks.map((task) =>
+                      task.segments.map((segment, index) => {
+                        const left = toPercent(segment.start);
+                        const width = ((segment.end - segment.start) / totalSpan) * 100;
+                        const widthInPixels = (width / 100) * chartWidth;
+                        const showArtigo = widthInPixels > 72;
+                        const showTime = widthInPixels > 116;
 
-  const machineRows = usedMachines.map((label) => ({
-    label,
-    tasks: machineTaskMap.get(label) || [],
-    getStart: (t: ScheduledTask) => t.machineStart,
-    getEnd: (t: ScheduledTask) => t.machineEnd,
-    suffix: "-m",
-    opacity: "55",
-  }));
+                        return (
+                          <div
+                            key={`${task.id}-${index}`}
+                            className="absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-2 text-[10px] font-semibold text-foreground shadow-sm"
+                            style={{
+                              left: `${left}%`,
+                              width: `${width}%`,
+                              backgroundColor: colorFill(task.colorIndex, segment.overflow),
+                              borderColor: colorBorder(task.colorIndex, segment.overflow),
+                              borderStyle: segment.overflow ? "dashed" : "solid",
+                            }}
+                            title={`${task.artigo} ${formatClock(task.start)}–${formatClock(task.end)}`}
+                          >
+                            {showArtigo && <span className="truncate leading-tight">{task.artigo}</span>}
+                            {showTime && (
+                              <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">
+                                {formatClock(task.start)}–{formatClock(task.end)}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-3 text-xs">
+              {legend.map((item) => {
+                const token = EQUIPMENT_COLOR_TOKENS[item.colorIndex % EQUIPMENT_COLOR_TOKENS.length];
+                return (
+                  <div key={item.id} className="flex items-center gap-1.5">
+                    <div
+                      className="h-3 w-3 rounded-sm border"
+                      style={{
+                        backgroundColor: `hsl(var(${token}) / 0.36)`,
+                        borderColor: `hsl(var(${token}) / 0.9)`,
+                      }}
+                    />
+                    <span>{item.label}</span>
+                  </div>
+                );
+              })}
+              <div className="flex items-center gap-1.5">
+                <div className="h-3 w-3 rounded-sm bg-muted" />
+                <span className="text-muted-foreground">Almoço 13:00–14:00</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="h-3 w-3 rounded-sm border border-border border-dashed bg-muted/30" />
+                <span className="text-muted-foreground">Overflow após 15:30</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function GanttChart({ dateStr }: GanttChartProps) {
+  const production = useStore((state) => state.production);
+  const categories = useStore((state) => state.categories);
+  const equipment = useStore((state) => state.equipment);
+  const getOperatorsForDate = useStore((state) => state.getOperatorsForDate);
+  const tempOperators = useStore((state) => state.tempOperators);
+
+  const schedule = useMemo(
+    () =>
+      buildDailyGanttSchedule({
+        dateStr: normalizeDateKey(dateStr),
+        production,
+        categories,
+        equipment,
+        operatorsForDate: getOperatorsForDate(dateStr),
+        tempOperators,
+      }),
+    [categories, dateStr, equipment, getOperatorsForDate, production, tempOperators]
+  );
+
+  const legend = useMemo(() => {
+    const seen = new Map<string, { id: string; label: string; colorIndex: number }>();
+    schedule.tasks.forEach((task) => {
+      if (!seen.has(task.equipmentId)) {
+        seen.set(task.equipmentId, {
+          id: task.equipmentId,
+          label: task.equipmentName,
+          colorIndex: task.colorIndex,
+        });
+      }
+    });
+    return Array.from(seen.values()).sort((left, right) => left.label.localeCompare(right.label));
+  }, [schedule.tasks]);
+
+  if (schedule.tasks.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base font-display">Sugestão de Planeamento</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="py-4 text-center text-sm text-muted-foreground">Sem tarefas para gerar planeamento.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const sharedAxisEnd = Math.max(schedule.axisEnd, DAY_END);
 
   return (
     <div className="space-y-4">
-      {renderChartSection("Sugestão de Planeamento — Por Equipamento", equipRows)}
-      {renderChartSection("Sugestão de Planeamento — Por Operador", operatorRows)}
-      {renderChartSection("Sugestão de Planeamento — Por Máquina", machineRows)}
+      <GanttSection<MachineTask>
+        title="Ocupação das Máquinas"
+        rows={schedule.machineRows}
+        axisEnd={sharedAxisEnd}
+        emptyMessage="Sem máquinas utilizadas neste dia."
+        legend={legend}
+      />
+      <GanttSection<OperatorTask>
+        title="Ocupação dos Operadores"
+        rows={schedule.operatorRows}
+        axisEnd={sharedAxisEnd}
+        emptyMessage="Sem operadores presentes na Escala para este dia."
+        legend={legend}
+      />
     </div>
   );
 }
