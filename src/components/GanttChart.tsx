@@ -1,14 +1,12 @@
 import { useMemo } from "react";
-import { useStore } from "@/store/useStore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  buildDailyGanttSchedule,
   DAY_END,
   DAY_START,
   formatClock,
   LUNCH_END,
   LUNCH_START,
-  normalizeDateKey,
+  type DailyGanttSchedule,
   type GanttRow,
   type MachineTask,
   type OperatorTask,
@@ -25,7 +23,7 @@ const EQUIPMENT_COLOR_TOKENS = [
 ];
 
 interface GanttChartProps {
-  dateStr: string;
+  schedule: DailyGanttSchedule;
 }
 
 function colorFill(index: number, overflow: boolean) {
@@ -38,7 +36,7 @@ function colorBorder(index: number, overflow: boolean) {
   return overflow ? `hsl(var(${token}) / 0.55)` : `hsl(var(${token}) / 0.9)`;
 }
 
-function GanttSection<TTask extends { id: string; artigo: string; start: number; end: number; colorIndex: number; segments: TimelineSegment[] }>(props: {
+function GanttSection<TTask extends { id: string; doseLabel: string; artigo: string; start: number; end: number; colorIndex: number; segments: TimelineSegment[] }>(props: {
   title: string;
   rows: GanttRow<TTask>[];
   axisEnd: number;
@@ -66,7 +64,7 @@ function GanttSection<TTask extends { id: string; artigo: string; start: number;
   const totalSpan = axisEnd - DAY_START;
   const chartWidth = Math.max(760, totalSpan * pixelsPerMinute);
   const toPercent = (minutes: number) => ((minutes - DAY_START) / totalSpan) * 100;
-  const markers = Array.from({ length: Math.floor((axisEnd - DAY_START) / 30) + 1 }, (_, index) => DAY_START + index * 30);
+  const markers = Array.from({ length: Math.floor((axisEnd - DAY_START) / 30) + 1 }, (_, i) => DAY_START + i * 30);
   const lunchLeft = toPercent(LUNCH_START);
   const lunchWidth = ((LUNCH_END - LUNCH_START) / totalSpan) * 100;
   const totalHeight = rows.length * rowHeight;
@@ -80,61 +78,42 @@ function GanttSection<TTask extends { id: string; artigo: string; start: number;
         <div className="overflow-x-auto">
           <div style={{ minWidth: labelWidth + chartWidth + 24 }}>
             <div className="relative mb-2" style={{ marginLeft: labelWidth, height: 18 }}>
-              {markers.filter((marker) => marker % 60 === 0).map((marker) => (
-                <div
-                  key={marker}
-                  className="absolute text-[10px] font-medium text-muted-foreground"
-                  style={{ left: `${toPercent(marker)}%`, transform: "translateX(-50%)" }}
-                >
-                  {formatClock(marker)}
+              {markers.filter((m) => m % 60 === 0).map((m) => (
+                <div key={m} className="absolute text-[10px] font-medium text-muted-foreground" style={{ left: `${toPercent(m)}%`, transform: "translateX(-50%)" }}>
+                  {formatClock(m)}
                 </div>
               ))}
             </div>
             <div className="relative">
-              <div
-                className="absolute z-0 rounded bg-muted/60"
-                style={{
-                  left: labelWidth + (lunchLeft / 100) * chartWidth,
-                  width: (lunchWidth / 100) * chartWidth,
-                  top: 0,
-                  height: totalHeight,
-                }}
-              />
-              {markers.map((marker) => (
-                <div
-                  key={marker}
-                  className={`absolute z-0 ${marker % 60 === 0 ? "border-l border-border/50" : "border-l border-border/25"}`}
-                  style={{ left: labelWidth + (toPercent(marker) / 100) * chartWidth, top: 0, height: totalHeight }}
-                />
+              <div className="absolute z-0 rounded bg-muted/60" style={{ left: labelWidth + (lunchLeft / 100) * chartWidth, width: (lunchWidth / 100) * chartWidth, top: 0, height: totalHeight }} />
+              {markers.map((m) => (
+                <div key={m} className={`absolute z-0 ${m % 60 === 0 ? "border-l border-border/50" : "border-l border-border/25"}`} style={{ left: labelWidth + (toPercent(m) / 100) * chartWidth, top: 0, height: totalHeight }} />
               ))}
               {rows.map((row) => (
                 <div key={row.label} className="relative flex items-center" style={{ height: rowHeight }}>
-                  <div className="truncate pr-3 text-xs font-semibold text-foreground" style={{ width: labelWidth }}>
-                    {row.label}
-                  </div>
+                  <div className="truncate pr-3 text-xs font-semibold text-foreground" style={{ width: labelWidth }}>{row.label}</div>
                   <div className="relative h-full flex-1 border-b border-border/30 bg-muted/5" style={{ width: chartWidth }}>
                     {row.tasks.map((task) =>
-                      task.segments.map((segment, index) => {
-                        const left = toPercent(segment.start);
-                        const width = ((segment.end - segment.start) / totalSpan) * 100;
-                        const widthInPixels = (width / 100) * chartWidth;
-                        const showArtigo = widthInPixels > 72;
-                        const showTime = widthInPixels > 116;
-
+                      task.segments.map((seg, si) => {
+                        const left = toPercent(seg.start);
+                        const width = ((seg.end - seg.start) / totalSpan) * 100;
+                        const widthPx = (width / 100) * chartWidth;
+                        const showName = widthPx > 50;
+                        const showTime = widthPx > 100;
                         return (
                           <div
-                            key={`${task.id}-${index}`}
-                            className="absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-2 text-[10px] font-semibold text-foreground shadow-sm"
+                            key={`${task.id}-${si}`}
+                            className="absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-1.5 text-[10px] font-semibold text-foreground shadow-sm"
                             style={{
                               left: `${left}%`,
                               width: `${width}%`,
-                              backgroundColor: colorFill(task.colorIndex, segment.overflow),
-                              borderColor: colorBorder(task.colorIndex, segment.overflow),
-                              borderStyle: segment.overflow ? "dashed" : "solid",
+                              backgroundColor: colorFill(task.colorIndex, seg.overflow),
+                              borderColor: colorBorder(task.colorIndex, seg.overflow),
+                              borderStyle: seg.overflow ? "dashed" : "solid",
                             }}
-                            title={`${task.artigo} ${formatClock(task.start)}–${formatClock(task.end)}`}
+                            title={`${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`}
                           >
-                            {showArtigo && <span className="truncate leading-tight">{task.artigo}</span>}
+                            {showName && <span className="truncate leading-tight">{task.artigo}</span>}
                             {showTime && (
                               <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">
                                 {formatClock(task.start)}–{formatClock(task.end)}
@@ -153,13 +132,7 @@ function GanttSection<TTask extends { id: string; artigo: string; start: number;
                 const token = EQUIPMENT_COLOR_TOKENS[item.colorIndex % EQUIPMENT_COLOR_TOKENS.length];
                 return (
                   <div key={item.id} className="flex items-center gap-1.5">
-                    <div
-                      className="h-3 w-3 rounded-sm border"
-                      style={{
-                        backgroundColor: `hsl(var(${token}) / 0.36)`,
-                        borderColor: `hsl(var(${token}) / 0.9)`,
-                      }}
-                    />
+                    <div className="h-3 w-3 rounded-sm border" style={{ backgroundColor: `hsl(var(${token}) / 0.36)`, borderColor: `hsl(var(${token}) / 0.9)` }} />
                     <span>{item.label}</span>
                   </div>
                 );
@@ -180,49 +153,22 @@ function GanttSection<TTask extends { id: string; artigo: string; start: number;
   );
 }
 
-export default function GanttChart({ dateStr }: GanttChartProps) {
-  const production = useStore((state) => state.production);
-  const categories = useStore((state) => state.categories);
-  const equipment = useStore((state) => state.equipment);
-  const getOperatorsForDate = useStore((state) => state.getOperatorsForDate);
-  const tempOperators = useStore((state) => state.tempOperators);
-
-  const schedule = useMemo(
-    () =>
-      buildDailyGanttSchedule({
-        dateStr: normalizeDateKey(dateStr),
-        production,
-        categories,
-        equipment,
-        operatorsForDate: getOperatorsForDate(dateStr),
-        tempOperators,
-      }),
-    [categories, dateStr, equipment, getOperatorsForDate, production, tempOperators]
-  );
-
+export default function GanttChart({ schedule }: GanttChartProps) {
   const legend = useMemo(() => {
     const seen = new Map<string, { id: string; label: string; colorIndex: number }>();
     schedule.tasks.forEach((task) => {
       if (!seen.has(task.equipmentId)) {
-        seen.set(task.equipmentId, {
-          id: task.equipmentId,
-          label: task.equipmentName,
-          colorIndex: task.colorIndex,
-        });
+        seen.set(task.equipmentId, { id: task.equipmentId, label: task.equipmentName, colorIndex: task.colorIndex });
       }
     });
-    return Array.from(seen.values()).sort((left, right) => left.label.localeCompare(right.label));
+    return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label));
   }, [schedule.tasks]);
 
   if (schedule.tasks.length === 0) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base font-display">Sugestão de Planeamento</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="py-4 text-center text-sm text-muted-foreground">Sem tarefas para gerar planeamento.</p>
-        </CardContent>
+        <CardHeader><CardTitle className="text-base font-display">Sugestão de Planeamento</CardTitle></CardHeader>
+        <CardContent><p className="py-4 text-center text-sm text-muted-foreground">Sem tarefas para gerar planeamento.</p></CardContent>
       </Card>
     );
   }
