@@ -43,6 +43,7 @@ interface AppState {
     pessoasPresentes: number;
     capacidadeDoDia: number;
     taxaOcupacao: { equipmentName: string; rate: number }[];
+    taxaOcupacaoGlobal: number;
   };
   getArtigoCategory: (artigo: string) => string | undefined;
 }
@@ -129,44 +130,48 @@ export const useStore = create<AppState>()(
         const ops = state.getOperatorsForDate(date);
         const temps = state.tempOperators.filter((t) => t.date === date);
 
-        // Carga do dia (hours) with 20% inefficiency
+        // Carga: based on T. Homem only with 20% inefficiency
         let cargaMinutes = 0;
         prod.forEach((p) => {
           const cat = state.categories.find((c) => c.id === p.categoriaId);
-          if (cat) cargaMinutes += p.quantidade * cat.tempoCicloHomem;
+          if (cat) {
+            const tHomem1 = cat.tempoCicloHomem1 ?? cat.tempoCicloHomem;
+            cargaMinutes += tHomem1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloHomem : 0);
+          }
         });
         const cargaDoDia = (cargaMinutes / 60) * INEFFICIENCY_FACTOR;
 
-        // Pessoas presentes
         const presentOps = ops.filter((o) => o.hours > 0);
         const pessoasPresentes = presentOps.length + temps.length;
-
-        // Capacidade do dia: people × 7.5h × (1 - 0.0625)
         const capacidadeDoDia = pessoasPresentes * 7.5 * (1 - BREAK_COEFFICIENT);
 
-        // Taxa de ocupação por equipamento
+        // Taxa ocupação por equipamento
         const equipMap = new Map<string, { machineMinutes: number }>();
         prod.forEach((p) => {
           const cat = state.categories.find((c) => c.id === p.categoriaId);
           if (cat) {
             const existing = equipMap.get(cat.equipamentoId) || { machineMinutes: 0 };
-            existing.machineMinutes += p.quantidade * cat.tempoCicloMaquina;
+            const tMaq1 = cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina;
+            existing.machineMinutes += tMaq1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloMaquina : 0);
             equipMap.set(cat.equipamentoId, existing);
           }
         });
 
-        const taxaOcupacao = state.equipment.map((eq) => {
-          const data = equipMap.get(eq.id);
-          const totalMachineMinutes = data?.machineMinutes || 0;
-          const availableMinutes = eq.quantidade * 7.5 * 60;
-          const rate = availableMinutes > 0 ? (totalMachineMinutes / availableMinutes) * 100 : 0;
-          return { equipmentName: eq.nome, rate };
-        });
+        const taxaOcupacao = state.equipment
+          .filter(eq => !eq.emergencia)
+          .map((eq) => {
+            const data = equipMap.get(eq.id);
+            const totalMachineMinutes = data?.machineMinutes || 0;
+            const availableMinutes = eq.quantidade * 7.5 * 60;
+            const rate = availableMinutes > 0 ? (totalMachineMinutes / availableMinutes) * 100 : 0;
+            return { equipmentName: eq.nome, rate };
+          });
 
-        return { cargaDoDia, pessoasPresentes, capacidadeDoDia, taxaOcupacao };
+        const taxaOcupacaoGlobal = capacidadeDoDia > 0 ? (cargaDoDia / capacidadeDoDia) * 100 : 0;
+
+        return { cargaDoDia, pessoasPresentes, capacidadeDoDia, taxaOcupacao, taxaOcupacaoGlobal };
       },
 
-      // Find the most recent category used for an artigo name
       getArtigoCategory: (artigo) => {
         const { production } = get();
         const match = [...production].reverse().find((p) => p.artigo.toLowerCase() === artigo.toLowerCase());
