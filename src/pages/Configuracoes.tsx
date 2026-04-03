@@ -354,7 +354,7 @@ export default function Configuracoes() {
           {/* Add new category form */}
           {!editCat && (
             <div className="space-y-3 mt-4 pt-3 border-t">
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap items-end">
                 <Input placeholder="Nome da categoria" value={catForm.nome} onChange={(e) => setCatForm({ ...catForm, nome: e.target.value })} className="h-8 text-xs flex-1 min-w-[120px]" />
                 <Select value={catForm.equipamentoId} onValueChange={(v) => setCatForm({ ...catForm, equipamentoId: v })}>
                   <SelectTrigger className="h-8 text-xs w-[130px]"><SelectValue placeholder="Equipamento" /></SelectTrigger>
@@ -362,21 +362,27 @@ export default function Configuracoes() {
                     {store.equipment.map((eq) => <SelectItem key={eq.id} value={eq.id}>{eq.nome}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <Input placeholder="T. Homem" type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className="h-8 text-xs w-20" />
-                <Input placeholder="T. Máquina" type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className="h-8 text-xs w-20" />
                 <Input placeholder="Unid." value={catForm.unidade} onChange={(e) => setCatForm({ ...catForm, unidade: e.target.value })} className="h-8 text-xs w-16" />
+              </div>
+              <div className="flex gap-2 flex-wrap items-end">
+                <div className="w-24">
+                  <Label className="text-[10px]">T. Homem 1ª</Label>
+                  <Input placeholder="min" type="number" value={catForm.tempoCicloHomem1} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem1: e.target.value })} className="h-8 text-xs" />
+                </div>
+                <div className="w-24">
+                  <Label className="text-[10px]">T. Homem Seg.</Label>
+                  <Input placeholder="min" type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className="h-8 text-xs" />
+                </div>
+                <div className="w-24">
+                  <Label className="text-[10px]">T. Máq. 1ª</Label>
+                  <Input placeholder="min" type="number" value={catForm.tempoCicloMaquina1} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina1: e.target.value })} className="h-8 text-xs" />
+                </div>
+                <div className="w-24">
+                  <Label className="text-[10px]">T. Máq. Seg.</Label>
+                  <Input placeholder="min" type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className="h-8 text-xs" />
+                </div>
                 <Button onClick={handleAddCat} size="sm" className="h-8 text-xs"><Plus className="h-3 w-3 mr-1" /> Adicionar</Button>
               </div>
-              <div className="flex items-center gap-2">
-                <Switch checked={catForm.showFirstUnit} onCheckedChange={(v) => setCatForm({ ...catForm, showFirstUnit: v })} />
-                <Label className="text-xs">Tempos 1ª unidade</Label>
-              </div>
-              {catForm.showFirstUnit && (
-                <div className="flex gap-2 pl-4 border-l-2 border-primary/30">
-                  <Input placeholder="T. Homem 1ª" type="number" value={catForm.tempoCicloHomem1} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem1: e.target.value })} className="h-8 text-xs w-24" />
-                  <Input placeholder="T. Máq. 1ª" type="number" value={catForm.tempoCicloMaquina1} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina1: e.target.value })} className="h-8 text-xs w-24" />
-                </div>
-              )}
             </div>
           )}
         </CardContent>
