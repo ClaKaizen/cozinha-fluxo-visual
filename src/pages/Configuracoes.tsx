@@ -331,10 +331,9 @@ export default function Configuracoes() {
                               setCatForm({
                                 nome: cat.nome, equipamentoId: cat.equipamentoId,
                                 tempoCicloHomem: String(cat.tempoCicloHomem), tempoCicloMaquina: String(cat.tempoCicloMaquina),
-                                tempoCicloHomem1: String(cat.tempoCicloHomem1 ?? ""), tempoCicloMaquina1: String(cat.tempoCicloMaquina1 ?? ""),
+                                tempoCicloHomem1: String(cat.tempoCicloHomem1 ?? cat.tempoCicloHomem), tempoCicloMaquina1: String(cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina),
                                 unidade: cat.unidade || "",
                                 equipamentos: cat.equipamentos ? [...cat.equipamentos] : [],
-                                showFirstUnit: cat.tempoCicloHomem1 != null || cat.tempoCicloMaquina1 != null,
                               });
                             }}>
                               <Edit2 className="h-3 w-3" />
