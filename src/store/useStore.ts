@@ -64,12 +64,7 @@ export const useStore = create<AppState>()(
         { id: 'cat3', nome: 'Frango Assado', equipamentoId: 'eq2', tempoCicloHomem: 20, tempoCicloMaquina: 60, unidade: 'unid' },
       ],
       production: [],
-      operators: [
-        { id: 'op1', nome: 'João Silva' },
-        { id: 'op2', nome: 'Maria Santos' },
-        { id: 'op3', nome: 'Pedro Costa' },
-        { id: 'op4', nome: 'Ana Ferreira' },
-      ],
+      operators: [],
       schedule: [],
       absences: [],
       tempOperators: [],
