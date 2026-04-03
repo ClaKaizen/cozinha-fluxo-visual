@@ -69,85 +69,70 @@ export default function Escala() {
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows: (string | number | null)[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
 
-        // Find month from row 6 (index 5), column B (index 1)
+        // Row 6 (1-indexed = index 5), column B (index 1): month name
         let monthName = "";
-        for (let r = 4; r < 8; r++) {
-          const cell = rows[r]?.[1];
-          if (cell && typeof cell === "string") {
-            const lower = cell.trim().toLowerCase();
-            if (MONTH_MAP[lower] !== undefined) {
-              monthName = lower;
-              break;
+        const monthCell = rows[5]?.[1];
+        if (monthCell && typeof monthCell === "string") {
+          monthName = monthCell.trim().toLowerCase();
+        }
+        if (!monthName || MONTH_MAP[monthName] === undefined) {
+          // Fallback: scan rows 4-8
+          for (let r = 4; r < 9; r++) {
+            for (let c = 0; c < 5; c++) {
+              const cell = rows[r]?.[c];
+              if (cell && typeof cell === "string" && MONTH_MAP[cell.trim().toLowerCase()] !== undefined) {
+                monthName = cell.trim().toLowerCase();
+                break;
+              }
             }
+            if (monthName) break;
           }
         }
 
-        if (!monthName) {
+        if (!monthName || MONTH_MAP[monthName] === undefined) {
           toast.error("Não foi possível encontrar o mês no ficheiro Excel");
           return;
         }
 
         const monthIndex = MONTH_MAP[monthName];
-        const year = month.getFullYear(); // Use current context year
+        const year = month.getFullYear();
 
-        // Find the day numbers row (row 8, index 7) - look for row with sequential numbers
-        let dayRow = -1;
-        let dayStartCol = -1;
-        const dayColMap = new Map<number, number>(); // col index → day number
+        // Row 8 (1-indexed = index 7): day numbers starting at column index 8
+        const dayRow = rows[7];
+        const dayColMap = new Map<number, number>();
 
-        for (let r = 6; r < 12; r++) {
-          const row = rows[r];
-          if (!row) continue;
-          let foundDays = 0;
-          for (let c = 5; c < row.length; c++) {
-            const val = row[c];
-            if (typeof val === "number" && val >= 1 && val <= 31) {
-              foundDays++;
-              if (foundDays === 1) dayStartCol = c;
+        if (dayRow) {
+          for (let c = 8; c < dayRow.length; c++) {
+            const val = dayRow[c];
+            if (val === null || val === undefined) continue;
+            const num = typeof val === "number" ? val : parseInt(String(val), 10);
+            if (!isNaN(num) && num >= 1 && num <= 31) {
+              dayColMap.set(c, num);
             }
-          }
-          if (foundDays >= 20) {
-            dayRow = r;
-            for (let c = dayStartCol; c < row.length; c++) {
-              const val = row[c];
-              if (typeof val === "number" && val >= 1 && val <= 31) {
-                dayColMap.set(c, val);
-              }
-            }
-            break;
           }
         }
 
-        if (dayRow === -1 || dayColMap.size === 0) {
+        if (dayColMap.size === 0) {
           toast.error("Não foi possível encontrar os dias do mês no ficheiro");
           return;
         }
 
-        // Parse operators starting after day-of-week row (dayRow + 2)
-        const operatorStartRow = dayRow + 2;
+        // Operator rows start at row 10 (1-indexed = index 9)
         let importedCount = 0;
         const unknownCodes = new Set<string>();
 
-        for (let r = operatorStartRow; r < rows.length; r++) {
+        for (let r = 9; r < rows.length; r++) {
           const row = rows[r];
           if (!row) continue;
 
-          const numInterno = row[0];
+          const colA = row[0];
+
+          // Stop when column A is not an integer (end of operator block)
+          if (colA === null || colA === undefined || colA === "") break;
+          const numInterno = typeof colA === "number" ? colA : parseInt(String(colA), 10);
+          if (isNaN(numInterno)) break;
+
           const name = row[3];
-
-          // Check for "Período de Almoço"
-          const rowText = row.join(" ").toLowerCase();
-          if (rowText.includes("período de almoço") || rowText.includes("periodo de almoco")) {
-            // Extract lunch time - not stored in current model, skip
-            continue;
-          }
-
-          // Stop if both col A and col D are empty
-          if ((numInterno === null || numInterno === undefined || numInterno === "") &&
-              (name === null || name === undefined || name === "")) {
-            continue;
-          }
-
           const operatorName = name?.toString().trim();
           if (!operatorName) continue;
 
@@ -157,14 +142,13 @@ export default function Escala() {
           );
           if (!operator) {
             store.addOperator(operatorName);
-            // Re-read to get the new operator with ID
             operator = useStore.getState().operators.find(
               (op) => op.nome.toLowerCase() === operatorName.toLowerCase()
             );
           }
           if (!operator) continue;
 
-          // Parse schedule codes for each day
+          // Parse schedule codes
           dayColMap.forEach((dayNum, colIdx) => {
             const cellVal = row[colIdx];
             if (cellVal === null || cellVal === undefined || cellVal === "") return;
