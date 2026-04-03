@@ -117,6 +117,15 @@ export default function Escala() {
           return;
         }
 
+        // Clear existing schedule entries for this month before importing
+        const monthStart = `${year}-${String(monthIndex + 1).padStart(2, "0")}-01`;
+        const monthEnd = `${year}-${String(monthIndex + 1).padStart(2, "0")}-31`;
+        const currentState = useStore.getState();
+        const filteredSchedule = currentState.schedule.filter(
+          (e) => e.date < monthStart || e.date > monthEnd
+        );
+        useStore.setState({ schedule: filteredSchedule });
+
         // Operator rows start at row 10 (1-indexed = index 9)
         let importedCount = 0;
         const unknownCodes = new Set<string>();
