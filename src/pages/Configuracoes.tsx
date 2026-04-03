@@ -232,37 +232,29 @@ export default function Configuracoes() {
                                 </SelectContent>
                               </Select>
                             </div>
-                            <div className="w-20">
-                              <Label className="text-[10px]">T. Homem</Label>
-                              <Input type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className={inputCls} />
-                            </div>
-                            <div className="w-20">
-                              <Label className="text-[10px]">T. Máquina</Label>
-                              <Input type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className={inputCls} />
-                            </div>
                             <div className="w-16">
                               <Label className="text-[10px]">Unidade</Label>
                               <Input value={catForm.unidade} onChange={(e) => setCatForm({ ...catForm, unidade: e.target.value })} className={inputCls} placeholder="kg" />
                             </div>
                           </div>
-
-                          {/* First unit toggle */}
-                          <div className="flex items-center gap-2">
-                            <Switch checked={catForm.showFirstUnit} onCheckedChange={(v) => setCatForm({ ...catForm, showFirstUnit: v })} />
-                            <Label className="text-xs">Tempos diferenciados (1ª unidade)</Label>
-                          </div>
-                          {catForm.showFirstUnit && (
-                            <div className="flex gap-2 pl-4 border-l-2 border-primary/30">
-                              <div className="w-24">
-                                <Label className="text-[10px]">T. Homem 1ª</Label>
-                                <Input type="number" value={catForm.tempoCicloHomem1} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem1: e.target.value })} className={inputCls} />
-                              </div>
-                              <div className="w-24">
-                                <Label className="text-[10px]">T. Máquina 1ª</Label>
-                                <Input type="number" value={catForm.tempoCicloMaquina1} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina1: e.target.value })} className={inputCls} />
-                              </div>
+                          <div className="flex gap-2 flex-wrap items-end">
+                            <div className="w-24">
+                              <Label className="text-[10px]">T. Homem 1ª</Label>
+                              <Input type="number" value={catForm.tempoCicloHomem1} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem1: e.target.value })} className={inputCls} />
                             </div>
-                          )}
+                            <div className="w-24">
+                              <Label className="text-[10px]">T. Homem Seg.</Label>
+                              <Input type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className={inputCls} />
+                            </div>
+                            <div className="w-24">
+                              <Label className="text-[10px]">T. Máq. 1ª</Label>
+                              <Input type="number" value={catForm.tempoCicloMaquina1} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina1: e.target.value })} className={inputCls} />
+                            </div>
+                            <div className="w-24">
+                              <Label className="text-[10px]">T. Máq. Seg.</Label>
+                              <Input type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className={inputCls} />
+                            </div>
+                          </div>
 
                           {/* Multi-equipment */}
                           <div className="space-y-2">
