@@ -22,10 +22,11 @@ export default function Configuracoes() {
   const [editEq, setEditEq] = useState<string | null>(null);
 
   const [catForm, setCatForm] = useState({
-    nome: "", equipamentoId: "", tempoCicloHomem: "", tempoCicloMaquina: "",
-    tempoCicloHomem1: "", tempoCicloMaquina1: "", unidade: "",
+    nome: "", equipamentoId: "",
+    tempoCicloHomem: "", tempoCicloMaquina: "",
+    tempoCicloHomem1: "", tempoCicloMaquina1: "",
+    unidade: "",
     equipamentos: [] as CategoryEquipmentEntry[],
-    showFirstUnit: false,
   });
   const [editCat, setEditCat] = useState<string | null>(null);
 
