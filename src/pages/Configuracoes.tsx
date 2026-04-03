@@ -291,10 +291,7 @@ export default function Configuracoes() {
                         </td>
                       ) : (
                         <>
-                          <td className={`${cellCls} font-medium`}>
-                            {cat.nome}
-                            {hasFirstUnit && <span className="ml-1 text-[9px] text-muted-foreground">(1ª dif.)</span>}
-                          </td>
+                          <td className={`${cellCls} font-medium`}>{cat.nome}</td>
                           <td className={cellCls}>
                             <div className="flex flex-wrap gap-1">
                               <Badge variant="outline" className="text-[10px] px-2 py-0 font-medium border"
@@ -314,16 +311,16 @@ export default function Configuracoes() {
                             </div>
                           </td>
                           <td className={`${cellCls} text-right`}>
-                            <span className="inline-flex items-center gap-1">
-                              <User className="h-3 w-3 text-muted-foreground" />
-                              {hasFirstUnit ? `${cat.tempoCicloHomem1}/${cat.tempoCicloHomem}` : cat.tempoCicloHomem} min
-                            </span>
+                            <div className="flex flex-col items-end gap-0.5">
+                              <span className="text-[10px] text-muted-foreground">1ª: {cat.tempoCicloHomem1 ?? cat.tempoCicloHomem} min</span>
+                              <span className="text-[10px]">seg: {cat.tempoCicloHomem} min</span>
+                            </div>
                           </td>
                           <td className={`${cellCls} text-right`}>
-                            <span className="inline-flex items-center gap-1">
-                              <Cog className="h-3 w-3 text-muted-foreground" />
-                              {hasFirstUnit ? `${cat.tempoCicloMaquina1}/${cat.tempoCicloMaquina}` : cat.tempoCicloMaquina} min
-                            </span>
+                            <div className="flex flex-col items-end gap-0.5">
+                              <span className="text-[10px] text-muted-foreground">1ª: {cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina} min</span>
+                              <span className="text-[10px]">seg: {cat.tempoCicloMaquina} min</span>
+                            </div>
                           </td>
                           <td className={cellCls}>
                             <Badge variant="secondary" className="text-[10px] px-2 py-0 font-normal">{cat.unidade || "-"}</Badge>
