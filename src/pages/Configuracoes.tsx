@@ -83,7 +83,7 @@ export default function Configuracoes() {
   const resetCatForm = () => setCatForm({
     nome: "", equipamentoId: "", tempoCicloHomem: "", tempoCicloMaquina: "",
     tempoCicloHomem1: "", tempoCicloMaquina1: "", unidade: "",
-    equipamentos: [], showFirstUnit: false,
+    equipamentos: [],
   });
 
   const addExtraEquipment = () => {
