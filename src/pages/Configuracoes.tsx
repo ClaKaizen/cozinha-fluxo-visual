@@ -56,8 +56,8 @@ export default function Configuracoes() {
         equipamentoId: catForm.equipamentoId,
         tempoCicloHomem: Number(catForm.tempoCicloHomem) || 0,
         tempoCicloMaquina: Number(catForm.tempoCicloMaquina) || 0,
-        tempoCicloHomem1: catForm.showFirstUnit ? (Number(catForm.tempoCicloHomem1) || undefined) : undefined,
-        tempoCicloMaquina1: catForm.showFirstUnit ? (Number(catForm.tempoCicloMaquina1) || undefined) : undefined,
+        tempoCicloHomem1: Number(catForm.tempoCicloHomem1) || Number(catForm.tempoCicloHomem) || 0,
+        tempoCicloMaquina1: Number(catForm.tempoCicloMaquina1) || Number(catForm.tempoCicloMaquina) || 0,
         unidade: catForm.unidade.trim() || "unid",
         equipamentos: catForm.equipamentos.length > 0 ? catForm.equipamentos : undefined,
       });
