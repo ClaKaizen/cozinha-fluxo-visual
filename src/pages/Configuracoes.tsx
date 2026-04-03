@@ -22,10 +22,11 @@ export default function Configuracoes() {
   const [editEq, setEditEq] = useState<string | null>(null);
 
   const [catForm, setCatForm] = useState({
-    nome: "", equipamentoId: "", tempoCicloHomem: "", tempoCicloMaquina: "",
-    tempoCicloHomem1: "", tempoCicloMaquina1: "", unidade: "",
+    nome: "", equipamentoId: "",
+    tempoCicloHomem: "", tempoCicloMaquina: "",
+    tempoCicloHomem1: "", tempoCicloMaquina1: "",
+    unidade: "",
     equipamentos: [] as CategoryEquipmentEntry[],
-    showFirstUnit: false,
   });
   const [editCat, setEditCat] = useState<string | null>(null);
 
@@ -55,8 +56,8 @@ export default function Configuracoes() {
         equipamentoId: catForm.equipamentoId,
         tempoCicloHomem: Number(catForm.tempoCicloHomem) || 0,
         tempoCicloMaquina: Number(catForm.tempoCicloMaquina) || 0,
-        tempoCicloHomem1: catForm.showFirstUnit ? (Number(catForm.tempoCicloHomem1) || undefined) : undefined,
-        tempoCicloMaquina1: catForm.showFirstUnit ? (Number(catForm.tempoCicloMaquina1) || undefined) : undefined,
+        tempoCicloHomem1: Number(catForm.tempoCicloHomem1) || Number(catForm.tempoCicloHomem) || 0,
+        tempoCicloMaquina1: Number(catForm.tempoCicloMaquina1) || Number(catForm.tempoCicloMaquina) || 0,
         unidade: catForm.unidade.trim() || "unid",
         equipamentos: catForm.equipamentos.length > 0 ? catForm.equipamentos : undefined,
       });
@@ -70,8 +71,8 @@ export default function Configuracoes() {
       equipamentoId: catForm.equipamentoId,
       tempoCicloHomem: Number(catForm.tempoCicloHomem) || 0,
       tempoCicloMaquina: Number(catForm.tempoCicloMaquina) || 0,
-      tempoCicloHomem1: catForm.showFirstUnit ? (Number(catForm.tempoCicloHomem1) || undefined) : undefined,
-      tempoCicloMaquina1: catForm.showFirstUnit ? (Number(catForm.tempoCicloMaquina1) || undefined) : undefined,
+      tempoCicloHomem1: Number(catForm.tempoCicloHomem1) || Number(catForm.tempoCicloHomem) || 0,
+      tempoCicloMaquina1: Number(catForm.tempoCicloMaquina1) || Number(catForm.tempoCicloMaquina) || 0,
       unidade: catForm.unidade.trim() || "unid",
       equipamentos: catForm.equipamentos.length > 0 ? catForm.equipamentos : undefined,
     });
@@ -82,7 +83,7 @@ export default function Configuracoes() {
   const resetCatForm = () => setCatForm({
     nome: "", equipamentoId: "", tempoCicloHomem: "", tempoCicloMaquina: "",
     tempoCicloHomem1: "", tempoCicloMaquina1: "", unidade: "",
-    equipamentos: [], showFirstUnit: false,
+    equipamentos: [],
   });
 
   const addExtraEquipment = () => {
@@ -200,8 +201,8 @@ export default function Configuracoes() {
                 <tr className="border-b text-xs text-muted-foreground">
                   <th className={`text-left font-medium ${cellCls}`}>Nome</th>
                   <th className={`text-left font-medium ${cellCls}`}>Equipamento</th>
-                  <th className={`text-right font-medium ${cellCls}`}>T. Homem</th>
-                  <th className={`text-right font-medium ${cellCls}`}>T. Máquina</th>
+                  <th className={`text-right font-medium ${cellCls}`}><User className="h-3 w-3 inline mr-1" />T. Homem</th>
+                  <th className={`text-right font-medium ${cellCls}`}><Cog className="h-3 w-3 inline mr-1" />T. Máquina</th>
                   <th className={`text-left font-medium ${cellCls}`}>Unidade</th>
                   <th className={`${cellCls} w-[70px]`}></th>
                 </tr>
@@ -231,37 +232,29 @@ export default function Configuracoes() {
                                 </SelectContent>
                               </Select>
                             </div>
-                            <div className="w-20">
-                              <Label className="text-[10px]">T. Homem</Label>
-                              <Input type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className={inputCls} />
-                            </div>
-                            <div className="w-20">
-                              <Label className="text-[10px]">T. Máquina</Label>
-                              <Input type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className={inputCls} />
-                            </div>
                             <div className="w-16">
                               <Label className="text-[10px]">Unidade</Label>
                               <Input value={catForm.unidade} onChange={(e) => setCatForm({ ...catForm, unidade: e.target.value })} className={inputCls} placeholder="kg" />
                             </div>
                           </div>
-
-                          {/* First unit toggle */}
-                          <div className="flex items-center gap-2">
-                            <Switch checked={catForm.showFirstUnit} onCheckedChange={(v) => setCatForm({ ...catForm, showFirstUnit: v })} />
-                            <Label className="text-xs">Tempos diferenciados (1ª unidade)</Label>
-                          </div>
-                          {catForm.showFirstUnit && (
-                            <div className="flex gap-2 pl-4 border-l-2 border-primary/30">
-                              <div className="w-24">
-                                <Label className="text-[10px]">T. Homem 1ª</Label>
-                                <Input type="number" value={catForm.tempoCicloHomem1} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem1: e.target.value })} className={inputCls} />
-                              </div>
-                              <div className="w-24">
-                                <Label className="text-[10px]">T. Máquina 1ª</Label>
-                                <Input type="number" value={catForm.tempoCicloMaquina1} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina1: e.target.value })} className={inputCls} />
-                              </div>
+                          <div className="flex gap-2 flex-wrap items-end">
+                            <div className="w-24">
+                              <Label className="text-[10px]">T. Homem 1ª</Label>
+                              <Input type="number" value={catForm.tempoCicloHomem1} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem1: e.target.value })} className={inputCls} />
                             </div>
-                          )}
+                            <div className="w-24">
+                              <Label className="text-[10px]">T. Homem Seg.</Label>
+                              <Input type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className={inputCls} />
+                            </div>
+                            <div className="w-24">
+                              <Label className="text-[10px]">T. Máq. 1ª</Label>
+                              <Input type="number" value={catForm.tempoCicloMaquina1} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina1: e.target.value })} className={inputCls} />
+                            </div>
+                            <div className="w-24">
+                              <Label className="text-[10px]">T. Máq. Seg.</Label>
+                              <Input type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className={inputCls} />
+                            </div>
+                          </div>
 
                           {/* Multi-equipment */}
                           <div className="space-y-2">
@@ -298,10 +291,7 @@ export default function Configuracoes() {
                         </td>
                       ) : (
                         <>
-                          <td className={`${cellCls} font-medium`}>
-                            {cat.nome}
-                            {hasFirstUnit && <span className="ml-1 text-[9px] text-muted-foreground">(1ª dif.)</span>}
-                          </td>
+                          <td className={`${cellCls} font-medium`}>{cat.nome}</td>
                           <td className={cellCls}>
                             <div className="flex flex-wrap gap-1">
                               <Badge variant="outline" className="text-[10px] px-2 py-0 font-medium border"
@@ -321,16 +311,16 @@ export default function Configuracoes() {
                             </div>
                           </td>
                           <td className={`${cellCls} text-right`}>
-                            <span className="inline-flex items-center gap-1">
-                              <User className="h-3 w-3 text-muted-foreground" />
-                              {hasFirstUnit ? `${cat.tempoCicloHomem1}/${cat.tempoCicloHomem}` : cat.tempoCicloHomem} min
-                            </span>
+                            <div className="flex flex-col items-end gap-0.5">
+                              <span className="text-[10px] text-muted-foreground">1ª: {cat.tempoCicloHomem1 ?? cat.tempoCicloHomem} min</span>
+                              <span className="text-[10px]">seg: {cat.tempoCicloHomem} min</span>
+                            </div>
                           </td>
                           <td className={`${cellCls} text-right`}>
-                            <span className="inline-flex items-center gap-1">
-                              <Cog className="h-3 w-3 text-muted-foreground" />
-                              {hasFirstUnit ? `${cat.tempoCicloMaquina1}/${cat.tempoCicloMaquina}` : cat.tempoCicloMaquina} min
-                            </span>
+                            <div className="flex flex-col items-end gap-0.5">
+                              <span className="text-[10px] text-muted-foreground">1ª: {cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina} min</span>
+                              <span className="text-[10px]">seg: {cat.tempoCicloMaquina} min</span>
+                            </div>
                           </td>
                           <td className={cellCls}>
                             <Badge variant="secondary" className="text-[10px] px-2 py-0 font-normal">{cat.unidade || "-"}</Badge>
@@ -341,10 +331,9 @@ export default function Configuracoes() {
                               setCatForm({
                                 nome: cat.nome, equipamentoId: cat.equipamentoId,
                                 tempoCicloHomem: String(cat.tempoCicloHomem), tempoCicloMaquina: String(cat.tempoCicloMaquina),
-                                tempoCicloHomem1: String(cat.tempoCicloHomem1 ?? ""), tempoCicloMaquina1: String(cat.tempoCicloMaquina1 ?? ""),
+                                tempoCicloHomem1: String(cat.tempoCicloHomem1 ?? cat.tempoCicloHomem), tempoCicloMaquina1: String(cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina),
                                 unidade: cat.unidade || "",
                                 equipamentos: cat.equipamentos ? [...cat.equipamentos] : [],
-                                showFirstUnit: cat.tempoCicloHomem1 != null || cat.tempoCicloMaquina1 != null,
                               });
                             }}>
                               <Edit2 className="h-3 w-3" />
@@ -365,7 +354,7 @@ export default function Configuracoes() {
           {/* Add new category form */}
           {!editCat && (
             <div className="space-y-3 mt-4 pt-3 border-t">
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap items-end">
                 <Input placeholder="Nome da categoria" value={catForm.nome} onChange={(e) => setCatForm({ ...catForm, nome: e.target.value })} className="h-8 text-xs flex-1 min-w-[120px]" />
                 <Select value={catForm.equipamentoId} onValueChange={(v) => setCatForm({ ...catForm, equipamentoId: v })}>
                   <SelectTrigger className="h-8 text-xs w-[130px]"><SelectValue placeholder="Equipamento" /></SelectTrigger>
@@ -373,21 +362,27 @@ export default function Configuracoes() {
                     {store.equipment.map((eq) => <SelectItem key={eq.id} value={eq.id}>{eq.nome}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <Input placeholder="T. Homem" type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className="h-8 text-xs w-20" />
-                <Input placeholder="T. Máquina" type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className="h-8 text-xs w-20" />
                 <Input placeholder="Unid." value={catForm.unidade} onChange={(e) => setCatForm({ ...catForm, unidade: e.target.value })} className="h-8 text-xs w-16" />
+              </div>
+              <div className="flex gap-2 flex-wrap items-end">
+                <div className="w-24">
+                  <Label className="text-[10px]">T. Homem 1ª</Label>
+                  <Input placeholder="min" type="number" value={catForm.tempoCicloHomem1} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem1: e.target.value })} className="h-8 text-xs" />
+                </div>
+                <div className="w-24">
+                  <Label className="text-[10px]">T. Homem Seg.</Label>
+                  <Input placeholder="min" type="number" value={catForm.tempoCicloHomem} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem: e.target.value })} className="h-8 text-xs" />
+                </div>
+                <div className="w-24">
+                  <Label className="text-[10px]">T. Máq. 1ª</Label>
+                  <Input placeholder="min" type="number" value={catForm.tempoCicloMaquina1} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina1: e.target.value })} className="h-8 text-xs" />
+                </div>
+                <div className="w-24">
+                  <Label className="text-[10px]">T. Máq. Seg.</Label>
+                  <Input placeholder="min" type="number" value={catForm.tempoCicloMaquina} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina: e.target.value })} className="h-8 text-xs" />
+                </div>
                 <Button onClick={handleAddCat} size="sm" className="h-8 text-xs"><Plus className="h-3 w-3 mr-1" /> Adicionar</Button>
               </div>
-              <div className="flex items-center gap-2">
-                <Switch checked={catForm.showFirstUnit} onCheckedChange={(v) => setCatForm({ ...catForm, showFirstUnit: v })} />
-                <Label className="text-xs">Tempos 1ª unidade</Label>
-              </div>
-              {catForm.showFirstUnit && (
-                <div className="flex gap-2 pl-4 border-l-2 border-primary/30">
-                  <Input placeholder="T. Homem 1ª" type="number" value={catForm.tempoCicloHomem1} onChange={(e) => setCatForm({ ...catForm, tempoCicloHomem1: e.target.value })} className="h-8 text-xs w-24" />
-                  <Input placeholder="T. Máq. 1ª" type="number" value={catForm.tempoCicloMaquina1} onChange={(e) => setCatForm({ ...catForm, tempoCicloMaquina1: e.target.value })} className="h-8 text-xs w-24" />
-                </div>
-              )}
             </div>
           )}
         </CardContent>
