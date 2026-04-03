@@ -201,8 +201,8 @@ export default function Configuracoes() {
                 <tr className="border-b text-xs text-muted-foreground">
                   <th className={`text-left font-medium ${cellCls}`}>Nome</th>
                   <th className={`text-left font-medium ${cellCls}`}>Equipamento</th>
-                  <th className={`text-right font-medium ${cellCls}`}>T. Homem</th>
-                  <th className={`text-right font-medium ${cellCls}`}>T. Máquina</th>
+                  <th className={`text-right font-medium ${cellCls}`}><User className="h-3 w-3 inline mr-1" />T. Homem</th>
+                  <th className={`text-right font-medium ${cellCls}`}><Cog className="h-3 w-3 inline mr-1" />T. Máquina</th>
                   <th className={`text-left font-medium ${cellCls}`}>Unidade</th>
                   <th className={`${cellCls} w-[70px]`}></th>
                 </tr>
