@@ -192,7 +192,7 @@ export default function Planeamento() {
                 <div className={`text-sm font-medium ${isTodayDate ? "text-secondary font-bold" : ""}`}>{format(day, "d")}</div>
                 {hasItems && (
                   <div className="mt-0.5 space-y-0.5">
-                    <Badge variant="default" className="text-[9px] px-1 py-0 h-4 font-bold" title="Operadores necessários">{carga > 0 ? Math.ceil(carga / (7.5 * (1 - 0.0625))) : 0}</Badge>
+                    <Badge variant="default" className="text-[9px] px-1 py-0 h-4 font-bold" title="Operadores necessários">{carga > 0 ? Math.ceil(carga / 7.5) : 0}</Badge>
                     <div className="text-[9px] text-muted-foreground leading-tight">{carga.toFixed(1)}h carga</div>
                     {cap > 0 && (
                       <>
