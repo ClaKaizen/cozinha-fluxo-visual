@@ -44,6 +44,29 @@ export default function Planeamento() {
     return cap > 0 ? (carga / cap) * 100 : 0;
   };
 
+  // Check if a day requires emergency equipment
+  const getDayEmergencyEquipment = (dateStr: string): string[] => {
+    const prod = store.production.filter((p) => p.date === dateStr);
+    const equipTimeNeeded = new Map<string, number>();
+    prod.forEach((p) => {
+      const cat = store.categories.find((c) => c.id === p.categoriaId);
+      if (cat) {
+        const tHomem1 = cat.tempoCicloHomem1 ?? cat.tempoCicloHomem;
+        const tMaq1 = cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina;
+        const total = (tHomem1 + tMaq1) + (p.quantidade > 1 ? (p.quantidade - 1) * (cat.tempoCicloHomem + cat.tempoCicloMaquina) : 0);
+        equipTimeNeeded.set(cat.equipamentoId, (equipTimeNeeded.get(cat.equipamentoId) ?? 0) + total);
+      }
+    });
+    const emergNames: string[] = [];
+    store.equipment.forEach((eq) => {
+      const needed = equipTimeNeeded.get(eq.id) ?? 0;
+      if (needed > eq.quantidade * 450 && (eq.quantidadeEmergencia ?? 0) > 0) {
+        emergNames.push(eq.nome);
+      }
+    });
+    return emergNames;
+  };
+
   const taxaColor = (rate: number) => {
     if (rate > 100) return "bg-destructive text-destructive-foreground";
     if (rate >= 80) return "bg-warning text-warning-foreground";
