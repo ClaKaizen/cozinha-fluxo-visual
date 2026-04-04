@@ -148,7 +148,7 @@ export default function Dashboard() {
             <CardTitle className="text-sm font-medium text-muted-foreground">Capacidade</CardTitle>
             <Tooltip>
               <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[260px] text-xs">{stats.pessoasPresentes} × 7.5h × 0.9375 = {stats.capacidadeDoDia.toFixed(1)}h</TooltipContent>
+              <TooltipContent className="max-w-[260px] text-xs">{stats.pessoasPresentes} × 7.5h = {stats.capacidadeDoDia.toFixed(1)}h</TooltipContent>
             </Tooltip>
           </CardHeader>
           <CardContent>
