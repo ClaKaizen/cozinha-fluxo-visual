@@ -211,7 +211,7 @@ export default function Dashboard() {
             {operators.map((o) => {
               const isWorking = WORKING_CODES.includes(o.code) && !o.absent;
               const opHours = operatorHoursMap.get(o.operator.nome) ?? 0;
-              const opRate = isWorking ? (opHours / EFFECTIVE_HOURS) * 100 : 0;
+              const opRate = isWorking ? (opHours / 7.5) * 100 : 0;
               return (
                 <div key={o.operator.id} className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2">
