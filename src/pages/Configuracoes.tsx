@@ -18,7 +18,7 @@ const EQUIPMENT_COLORS = [
 export default function Configuracoes() {
   const store = useStore();
 
-  const [eqForm, setEqForm] = useState({ nome: "", quantidade: "", emergencia: false });
+  const [eqForm, setEqForm] = useState({ nome: "", quantidade: "", quantidadeEmergencia: "" });
   const [editEq, setEditEq] = useState<string | null>(null);
 
   const [catForm, setCatForm] = useState({
@@ -33,20 +33,25 @@ export default function Configuracoes() {
   const eqColorMap = new Map<string, string>();
   store.equipment.forEach((eq, idx) => eqColorMap.set(eq.id, EQUIPMENT_COLORS[idx % EQUIPMENT_COLORS.length]));
 
-  const normalEquipment = store.equipment.filter(e => !e.emergencia);
-  const emergencyEquipment = store.equipment.filter(e => e.emergencia);
-
   const handleAddEq = () => {
     if (eqForm.nome.trim()) {
-      store.addEquipment({ nome: eqForm.nome.trim(), quantidade: Number(eqForm.quantidade) || 1, emergencia: eqForm.emergencia });
-      setEqForm({ nome: "", quantidade: "", emergencia: false });
+      store.addEquipment({
+        nome: eqForm.nome.trim(),
+        quantidade: Number(eqForm.quantidade) || 1,
+        quantidadeEmergencia: Number(eqForm.quantidadeEmergencia) || 0,
+      });
+      setEqForm({ nome: "", quantidade: "", quantidadeEmergencia: "" });
     }
   };
 
   const handleSaveEq = (id: string) => {
-    store.updateEquipment(id, { nome: eqForm.nome, quantidade: Number(eqForm.quantidade) || 1, emergencia: eqForm.emergencia });
+    store.updateEquipment(id, {
+      nome: eqForm.nome,
+      quantidade: Number(eqForm.quantidade) || 1,
+      quantidadeEmergencia: Number(eqForm.quantidadeEmergencia) || 0,
+    });
     setEditEq(null);
-    setEqForm({ nome: "", quantidade: "", emergencia: false });
+    setEqForm({ nome: "", quantidade: "", quantidadeEmergencia: "" });
   };
 
   const handleAddCat = () => {
@@ -107,62 +112,6 @@ export default function Configuracoes() {
   const inputCls = "h-7 text-xs";
   const cellCls = "px-2 py-1";
 
-  const renderEquipmentTable = (items: typeof store.equipment, title?: string) => (
-    <>
-      {title && (
-        <div className="flex items-center gap-2 mt-4 mb-2">
-          <AlertTriangle className="h-4 w-4 text-warning" />
-          <span className="text-sm font-semibold text-warning">{title}</span>
-        </div>
-      )}
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b text-xs text-muted-foreground">
-            <th className={`text-left font-medium ${cellCls}`}>Nome</th>
-            <th className={`text-right font-medium ${cellCls}`}>Quantidade</th>
-            <th className={`text-center font-medium ${cellCls}`}>Emergência</th>
-            <th className={`${cellCls} w-[80px]`}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((eq) => (
-            <tr key={eq.id} className="border-b last:border-b-0 hover:bg-muted/30">
-              {editEq === eq.id ? (
-                <>
-                  <td className={cellCls}><Input value={eqForm.nome} onChange={(e) => setEqForm({ ...eqForm, nome: e.target.value })} className={inputCls} /></td>
-                  <td className={cellCls}><Input type="number" value={eqForm.quantidade} onChange={(e) => setEqForm({ ...eqForm, quantidade: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
-                  <td className={`${cellCls} text-center`}>
-                    <Switch checked={eqForm.emergencia} onCheckedChange={(v) => setEqForm({ ...eqForm, emergencia: v })} />
-                  </td>
-                  <td className={`${cellCls} text-right`}>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleSaveEq(eq.id)}><Save className="h-3 w-3" /></Button>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setEditEq(null)}><X className="h-3 w-3" /></Button>
-                  </td>
-                </>
-              ) : (
-                <>
-                  <td className={`${cellCls} font-medium`}>{eq.nome}</td>
-                  <td className={`${cellCls} text-right`}>{eq.quantidade}</td>
-                  <td className={`${cellCls} text-center`}>
-                    {eq.emergencia && <Badge variant="outline" className="text-[10px] text-warning border-warning/40 bg-warning/10">Emergência</Badge>}
-                  </td>
-                  <td className={`${cellCls} text-right`}>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => { setEditEq(eq.id); setEqForm({ nome: eq.nome, quantidade: String(eq.quantidade), emergencia: eq.emergencia ?? false }); }}>
-                      <Edit2 className="h-3 w-3" />
-                    </Button>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-1" onClick={() => store.deleteEquipment(eq.id)}>
-                      <Trash2 className="h-3 w-3 text-destructive" />
-                    </Button>
-                  </td>
-                </>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
-  );
-
   return (
     <div className="space-y-8 animate-fade-in">
       <h1 className="text-2xl font-display font-bold">Configurações</h1>
@@ -174,15 +123,62 @@ export default function Configuracoes() {
           <span className="text-white font-display font-semibold text-base">Equipamentos</span>
         </div>
         <CardContent className="pt-4">
-          {renderEquipmentTable(normalEquipment)}
-          {emergencyEquipment.length > 0 && renderEquipmentTable(emergencyEquipment, "Equipamentos de Emergência")}
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-xs text-muted-foreground">
+                <th className={`text-left font-medium ${cellCls}`}>Nome</th>
+                <th className={`text-right font-medium ${cellCls}`}>Qtd. Normal</th>
+                <th className={`text-right font-medium ${cellCls}`}>Qtd. Emergência</th>
+                <th className={`${cellCls} w-[80px]`}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {store.equipment.map((eq) => (
+                <tr key={eq.id} className="border-b last:border-b-0 hover:bg-muted/30">
+                  {editEq === eq.id ? (
+                    <>
+                      <td className={cellCls}><Input value={eqForm.nome} onChange={(e) => setEqForm({ ...eqForm, nome: e.target.value })} className={inputCls} /></td>
+                      <td className={cellCls}><Input type="number" value={eqForm.quantidade} onChange={(e) => setEqForm({ ...eqForm, quantidade: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
+                      <td className={cellCls}><Input type="number" value={eqForm.quantidadeEmergencia} onChange={(e) => setEqForm({ ...eqForm, quantidadeEmergencia: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
+                      <td className={`${cellCls} text-right`}>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleSaveEq(eq.id)}><Save className="h-3 w-3" /></Button>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setEditEq(null)}><X className="h-3 w-3" /></Button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className={`${cellCls} font-medium`}>{eq.nome}</td>
+                      <td className={`${cellCls} text-right`}>{eq.quantidade}</td>
+                      <td className={`${cellCls} text-right`}>
+                        {(eq.quantidadeEmergencia ?? 0) > 0 ? (
+                          <Badge variant="outline" className="text-[10px] text-warning border-warning/40 bg-warning/10">
+                            {eq.quantidadeEmergencia} emerg.
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">0</span>
+                        )}
+                      </td>
+                      <td className={`${cellCls} text-right`}>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => {
+                          setEditEq(eq.id);
+                          setEqForm({ nome: eq.nome, quantidade: String(eq.quantidade), quantidadeEmergencia: String(eq.quantidadeEmergencia ?? 0) });
+                        }}>
+                          <Edit2 className="h-3 w-3" />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-1" onClick={() => store.deleteEquipment(eq.id)}>
+                          <Trash2 className="h-3 w-3 text-destructive" />
+                        </Button>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
           <div className="flex gap-2 mt-3 items-center">
             <Input placeholder="Nome do equipamento" value={editEq ? "" : eqForm.nome} onChange={(e) => !editEq && setEqForm({ ...eqForm, nome: e.target.value })} className="h-8 text-xs" disabled={!!editEq} />
-            <Input placeholder="QD" type="number" value={editEq ? "" : eqForm.quantidade} onChange={(e) => !editEq && setEqForm({ ...eqForm, quantidade: e.target.value })} className="h-8 text-xs w-16" disabled={!!editEq} />
-            <div className="flex items-center gap-1.5">
-              <Switch checked={editEq ? false : eqForm.emergencia} onCheckedChange={(v) => !editEq && setEqForm({ ...eqForm, emergencia: v })} disabled={!!editEq} />
-              <Label className="text-xs text-muted-foreground">Emerg.</Label>
-            </div>
+            <Input placeholder="Qtd. Normal" type="number" value={editEq ? "" : eqForm.quantidade} onChange={(e) => !editEq && setEqForm({ ...eqForm, quantidade: e.target.value })} className="h-8 text-xs w-24" disabled={!!editEq} />
+            <Input placeholder="Qtd. Emerg." type="number" value={editEq ? "" : eqForm.quantidadeEmergencia} onChange={(e) => !editEq && setEqForm({ ...eqForm, quantidadeEmergencia: e.target.value })} className="h-8 text-xs w-24" disabled={!!editEq} />
             <Button onClick={handleAddEq} disabled={!!editEq} size="sm" className="h-8 text-xs"><Plus className="h-3 w-3 mr-1" /> Adicionar</Button>
           </div>
         </CardContent>
@@ -211,7 +207,6 @@ export default function Configuracoes() {
                 {store.categories.map((cat) => {
                   const eqColor = eqColorMap.get(cat.equipamentoId) || "hsl(var(--muted-foreground))";
                   const eqName = store.equipment.find((e) => e.id === cat.equipamentoId)?.nome || "-";
-                  const hasFirstUnit = cat.tempoCicloHomem1 != null || cat.tempoCicloMaquina1 != null;
                   const hasExtraEquip = cat.equipamentos && cat.equipamentos.length > 0;
 
                   return (

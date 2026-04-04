@@ -2,7 +2,7 @@ export interface Equipment {
   id: string;
   nome: string;
   quantidade: number;
-  emergencia?: boolean;
+  quantidadeEmergencia: number;
 }
 
 export interface CategoryEquipmentEntry {
