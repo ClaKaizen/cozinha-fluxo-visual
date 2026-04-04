@@ -129,7 +129,8 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
             <div className="mt-3 flex flex-wrap gap-3 text-xs">
               {legend.map((item) => {
