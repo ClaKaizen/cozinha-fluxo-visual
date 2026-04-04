@@ -270,6 +270,12 @@ export default function Planeamento() {
                       )}
                     </div>
                   </div>
+                  {emergEquip.length > 0 && (
+                    <div className="flex items-center gap-2 px-4 py-1.5 bg-warning/10 text-warning text-xs font-medium">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      <span>⚠️ Requer equipamento de emergência: {emergEquip.join(", ")}</span>
+                    </div>
+                  )}
                   {/* Day table */}
                   <table className="w-full text-sm">
                     <thead>
