@@ -35,7 +35,7 @@ export default function Planeamento() {
     const presentOps = ops.filter((o) => WORKING_CODES.includes(o.code) && !o.absent);
     const temps = store.tempOperators.filter((t) => t.date === dateStr);
     const pessoasPresentes = presentOps.length + temps.length;
-    return pessoasPresentes * 7.5 * (1 - BREAK_COEFFICIENT);
+    return pessoasPresentes * 7.5;
   };
 
   const getTaxaOcupacao = (dateStr: string) => {
