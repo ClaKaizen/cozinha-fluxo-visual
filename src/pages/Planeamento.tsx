@@ -200,6 +200,7 @@ export default function Planeamento() {
             const carga = getDayCarga(dateStr);
             const cap = getDayCapacidade(dateStr);
             const taxa = getTaxaOcupacao(dateStr);
+            const emergEquip = getDayEmergencyEquipment(dateStr);
             const isSelected = selectedDate === dateStr;
             const isTodayDate = isToday(day);
             const hasItems = count > 0;
