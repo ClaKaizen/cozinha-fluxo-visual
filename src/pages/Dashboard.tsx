@@ -192,7 +192,10 @@ export default function Dashboard() {
         <Card className="border-l-4 border-l-secondary">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Ocupação Equip.</CardTitle>
-            <Activity className="h-5 w-5 text-secondary" />
+            <Tooltip>
+              <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
+              <TooltipContent className="max-w-[260px] text-xs">Σ(T.Homem + T.Máquina) ÷ (Nº máquinas × 450 min) × 100%</TooltipContent>
+            </Tooltip>
           </CardHeader>
           <CardContent>
             <div className="space-y-1">
