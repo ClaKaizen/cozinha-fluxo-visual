@@ -3,7 +3,7 @@ import { format, addDays, subDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, Users, Activity, UserMinus, UserPlus, Info, UserCheck, AlertTriangle, Gauge } from "lucide-react";
 import { useStore } from "@/store/useStore";
-import { WORKING_CODES, EFFECTIVE_HOURS } from "@/store/types";
+import { WORKING_CODES, EFFECTIVE_HOURS, AVAILABLE_MINUTES } from "@/store/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
