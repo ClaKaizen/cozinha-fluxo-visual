@@ -8,6 +8,7 @@ export interface Equipment {
 export interface CategoryEquipmentEntry {
   equipamentoId: string;
   tempoCicloMaquina: number;
+  tempoCicloMaquina1?: number;
   simultaneo: boolean;
 }
 
