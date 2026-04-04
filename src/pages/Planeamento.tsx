@@ -3,7 +3,7 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMont
 import { pt } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, Plus, Trash2, CalendarDays, List, Clock, Package } from "lucide-react";
 import { useStore } from "@/store/useStore";
-import { INEFFICIENCY_FACTOR, WORKING_CODES, BREAK_COEFFICIENT } from "@/store/types";
+import { INEFFICIENCY_FACTOR, WORKING_CODES } from "@/store/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -35,7 +35,7 @@ export default function Planeamento() {
     const presentOps = ops.filter((o) => WORKING_CODES.includes(o.code) && !o.absent);
     const temps = store.tempOperators.filter((t) => t.date === dateStr);
     const pessoasPresentes = presentOps.length + temps.length;
-    return pessoasPresentes * 7.5 * (1 - BREAK_COEFFICIENT);
+    return pessoasPresentes * 7.5;
   };
 
   const getTaxaOcupacao = (dateStr: string) => {
@@ -192,7 +192,7 @@ export default function Planeamento() {
                 <div className={`text-sm font-medium ${isTodayDate ? "text-secondary font-bold" : ""}`}>{format(day, "d")}</div>
                 {hasItems && (
                   <div className="mt-0.5 space-y-0.5">
-                    <Badge variant="default" className="text-[9px] px-1 py-0 h-4 font-bold" title="Operadores necessários">{carga > 0 ? Math.ceil(carga / (7.5 * (1 - 0.0625))) : 0}</Badge>
+                    <Badge variant="default" className="text-[9px] px-1 py-0 h-4 font-bold" title="Operadores necessários">{carga > 0 ? Math.ceil(carga / 7.5) : 0}</Badge>
                     <div className="text-[9px] text-muted-foreground leading-tight">{carga.toFixed(1)}h carga</div>
                     {cap > 0 && (
                       <>

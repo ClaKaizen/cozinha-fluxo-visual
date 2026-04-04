@@ -8,6 +8,7 @@ export interface Equipment {
 export interface CategoryEquipmentEntry {
   equipamentoId: string;
   tempoCicloMaquina: number;
+  tempoCicloMaquina1?: number;
   simultaneo: boolean;
 }
 
@@ -65,4 +66,5 @@ export interface TempOperator {
 
 export const BREAK_COEFFICIENT = 0.0625;
 export const INEFFICIENCY_FACTOR = 1.20;
-export const EFFECTIVE_HOURS = 7.5 * (1 - BREAK_COEFFICIENT); // 7.03125
+export const EFFECTIVE_HOURS = 7.5; // Direct 7.5h per operator, no break coefficient
+export const AVAILABLE_MINUTES = 450; // 07:00-15:30 (510 min) minus 60 min lunch
