@@ -78,7 +78,7 @@ export default function Dashboard() {
     }
   };
 
-  const pessoasNecessarias = Math.ceil(stats.cargaDoDia / EFFECTIVE_HOURS);
+  const pessoasNecessarias = Math.ceil(stats.cargaDoDia / 7.5);
   const delta = stats.pessoasPresentes - pessoasNecessarias;
   const dimensionamentoOk = delta >= 0;
 
