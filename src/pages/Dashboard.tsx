@@ -235,7 +235,7 @@ export default function Dashboard() {
             })}
             {tempOps.map((t) => {
               const opHours = operatorHoursMap.get(t.nome) ?? 0;
-              const opRate = (opHours / EFFECTIVE_HOURS) * 100;
+              const opRate = (opHours / 7.5) * 100;
               return (
                 <div key={t.id} className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2">
