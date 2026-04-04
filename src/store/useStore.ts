@@ -54,9 +54,9 @@ export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
       equipment: [
-        { id: 'eq1', nome: 'Basculante', quantidade: 4 },
-        { id: 'eq2', nome: 'Forno', quantidade: 3 },
-        { id: 'eq3', nome: 'Panela', quantidade: 2 },
+        { id: 'eq1', nome: 'Basculante', quantidade: 4, quantidadeEmergencia: 0 },
+        { id: 'eq2', nome: 'Forno', quantidade: 3, quantidadeEmergencia: 0 },
+        { id: 'eq3', nome: 'Panela', quantidade: 2, quantidadeEmergencia: 0 },
       ],
       categories: [
         { id: 'cat1', nome: 'Molho Base Bechamel', equipamentoId: 'eq3', tempoCicloHomem: 15, tempoCicloMaquina: 45, unidade: 'kg' },
@@ -126,7 +126,6 @@ export const useStore = create<AppState>()(
         const temps = state.tempOperators.filter((t) => t.date === date);
 
         // Carga: T. Homem only with 20% inefficiency
-        // Use T. Homem 1ª for first unit + T. Homem Seg. × (QD-1) for rest
         let cargaMinutes = 0;
         prod.forEach((p) => {
           const cat = state.categories.find((c) => c.id === p.categoriaId);
@@ -139,16 +138,13 @@ export const useStore = create<AppState>()(
 
         const presentOps = ops.filter((o) => o.hours > 0);
         const pessoasPresentes = presentOps.length + temps.length;
-        // Capacidade = Pessoas Presentes × 7.5h (direct, no break coefficient)
         const capacidadeDoDia = pessoasPresentes * 7.5;
 
-        // Taxa ocupação por equipamento
-        // Taxa = Σ (T. Homem total + T. Máquina total) ÷ (Nº máquinas × 450 min) × 100%
+        // Taxa ocupação por equipamento — use only normal quantity
         const equipMap = new Map<string, { totalMinutes: number }>();
         prod.forEach((p) => {
           const cat = state.categories.find((c) => c.id === p.categoriaId);
           if (cat) {
-            // Primary equipment
             const tHomem1 = cat.tempoCicloHomem1 ?? cat.tempoCicloHomem;
             const tMaq1 = cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina;
             const totalHomem = tHomem1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloHomem : 0);
@@ -158,7 +154,6 @@ export const useStore = create<AppState>()(
             existing.totalMinutes += totalHomem + totalMaq;
             equipMap.set(cat.equipamentoId, existing);
 
-            // Additional simultaneous equipment
             if (cat.equipamentos) {
               cat.equipamentos.forEach((extra) => {
                 if (extra.simultaneo) {
@@ -174,11 +169,10 @@ export const useStore = create<AppState>()(
         });
 
         const taxaOcupacao = state.equipment
-          .filter(eq => !eq.emergencia)
           .map((eq) => {
             const data = equipMap.get(eq.id);
             const totalMinutes = data?.totalMinutes || 0;
-            const availableMinutes = eq.quantidade * 450; // 450 min effective per machine
+            const availableMinutes = eq.quantidade * 450;
             const rate = availableMinutes > 0 ? (totalMinutes / availableMinutes) * 100 : 0;
             return { equipmentName: eq.nome, rate };
           });

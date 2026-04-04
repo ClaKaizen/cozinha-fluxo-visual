@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, isToday } from "date-fns";
 import { pt } from "date-fns/locale";
-import { ChevronLeft, ChevronRight, Plus, Trash2, CalendarDays, List, Clock, Package } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Trash2, CalendarDays, List, Clock, Package, AlertTriangle } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { INEFFICIENCY_FACTOR, WORKING_CODES } from "@/store/types";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,29 @@ export default function Planeamento() {
     const carga = getDayCarga(dateStr);
     const cap = getDayCapacidade(dateStr);
     return cap > 0 ? (carga / cap) * 100 : 0;
+  };
+
+  // Check if a day requires emergency equipment
+  const getDayEmergencyEquipment = (dateStr: string): string[] => {
+    const prod = store.production.filter((p) => p.date === dateStr);
+    const equipTimeNeeded = new Map<string, number>();
+    prod.forEach((p) => {
+      const cat = store.categories.find((c) => c.id === p.categoriaId);
+      if (cat) {
+        const tHomem1 = cat.tempoCicloHomem1 ?? cat.tempoCicloHomem;
+        const tMaq1 = cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina;
+        const total = (tHomem1 + tMaq1) + (p.quantidade > 1 ? (p.quantidade - 1) * (cat.tempoCicloHomem + cat.tempoCicloMaquina) : 0);
+        equipTimeNeeded.set(cat.equipamentoId, (equipTimeNeeded.get(cat.equipamentoId) ?? 0) + total);
+      }
+    });
+    const emergNames: string[] = [];
+    store.equipment.forEach((eq) => {
+      const needed = equipTimeNeeded.get(eq.id) ?? 0;
+      if (needed > eq.quantidade * 450 && (eq.quantidadeEmergencia ?? 0) > 0) {
+        emergNames.push(eq.nome);
+      }
+    });
+    return emergNames;
   };
 
   const taxaColor = (rate: number) => {
@@ -177,6 +200,7 @@ export default function Planeamento() {
             const carga = getDayCarga(dateStr);
             const cap = getDayCapacidade(dateStr);
             const taxa = getTaxaOcupacao(dateStr);
+            const emergEquip = getDayEmergencyEquipment(dateStr);
             const isSelected = selectedDate === dateStr;
             const isTodayDate = isToday(day);
             const hasItems = count > 0;
@@ -192,7 +216,10 @@ export default function Planeamento() {
                 <div className={`text-sm font-medium ${isTodayDate ? "text-secondary font-bold" : ""}`}>{format(day, "d")}</div>
                 {hasItems && (
                   <div className="mt-0.5 space-y-0.5">
-                    <Badge variant="default" className="text-[9px] px-1 py-0 h-4 font-bold" title="Operadores necessários">{carga > 0 ? Math.ceil(carga / 7.5) : 0}</Badge>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="default" className="text-[9px] px-1 py-0 h-4 font-bold" title="Operadores necessários">{carga > 0 ? Math.ceil(carga / 7.5) : 0}</Badge>
+                      {emergEquip.length > 0 && <span title={`Emergência: ${emergEquip.join(", ")}`}><AlertTriangle className="h-3 w-3 text-warning" /></span>}
+                    </div>
                     <div className="text-[9px] text-muted-foreground leading-tight">{carga.toFixed(1)}h carga</div>
                     {cap > 0 && (
                       <>
@@ -222,6 +249,7 @@ export default function Planeamento() {
               const carga = getDayCarga(dateStr);
               const cap = getDayCapacidade(dateStr);
               const taxa = cap > 0 ? (carga / cap) * 100 : 0;
+              const emergEquip = getDayEmergencyEquipment(dateStr);
               return (
                 <div key={dateStr} className="rounded-lg border overflow-hidden bg-card">
                   {/* Day header */}
@@ -242,6 +270,12 @@ export default function Planeamento() {
                       )}
                     </div>
                   </div>
+                  {emergEquip.length > 0 && (
+                    <div className="flex items-center gap-2 px-4 py-1.5 bg-warning/10 text-warning text-xs font-medium">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      <span>⚠️ Requer equipamento de emergência: {emergEquip.join(", ")}</span>
+                    </div>
+                  )}
                   {/* Day table */}
                   <table className="w-full text-sm">
                     <thead>

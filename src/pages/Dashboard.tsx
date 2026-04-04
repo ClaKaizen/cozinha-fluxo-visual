@@ -114,7 +114,7 @@ export default function Dashboard() {
       {schedule.usesEmergencyEquipment && (
         <div className="flex items-center gap-2 rounded-lg border border-warning/50 bg-warning/10 px-4 py-3 text-sm font-medium text-warning">
           <AlertTriangle className="h-5 w-5" />
-          <span>Equipamento de emergência está a ser utilizado neste dia.</span>
+          <span>⚠️ Equipamentos de emergência em uso: {schedule.emergencyEquipmentNames.join(", ")}</span>
         </div>
       )}
 

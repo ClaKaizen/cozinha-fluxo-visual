@@ -38,6 +38,7 @@ export interface MachineTask extends PlanningTask {
   start: number;
   end: number;
   segments: TimelineSegment[];
+  isEmergencyMachine: boolean;
 }
 
 export interface OperatorTask extends PlanningTask {
@@ -59,6 +60,7 @@ export interface DailyGanttSchedule {
   operatorRows: GanttRow<OperatorTask>[];
   axisEnd: number;
   usesEmergencyEquipment: boolean;
+  emergencyEquipmentNames: string[];
 }
 
 export interface OperatorPresence {
@@ -160,94 +162,85 @@ export function buildDailyGanttSchedule({
           machineDuration: duration,
           operatorDuration: tHomem,
           colorIndex: (equipmentIndex.get(machine.id) ?? 0) % 6,
-          isEmergency: machine.emergencia ?? false,
+          isEmergency: false,
         });
       }
     });
 
   if (tasks.length === 0) {
-    return { tasks: [], machineRows: [], operatorRows: [], axisEnd: DAY_END, usesEmergencyEquipment: false };
+    return { tasks: [], machineRows: [], operatorRows: [], axisEnd: DAY_END, usesEmergencyEquipment: false, emergencyEquipmentNames: [] };
   }
 
-  // Separate normal and emergency equipment
-  const normalEquipment = equipment.filter((e) => !e.emergencia);
-  const emergencyEquipment = equipment.filter((e) => e.emergencia);
-
-  // Phase 1: schedule on normal equipment
-  const machineAvailability = new Map<string, number[]>();
-  normalEquipment.forEach((item) => {
-    machineAvailability.set(item.id, Array.from({ length: item.quantidade }, () => DAY_START));
+  // Step 1: Check per-equipment if normal capacity suffices
+  const equipmentTimeNeeded = new Map<string, number>();
+  tasks.forEach((t) => {
+    equipmentTimeNeeded.set(t.equipmentId, (equipmentTimeNeeded.get(t.equipmentId) ?? 0) + t.machineDuration);
   });
 
+  const emergencyEquipmentNames: string[] = [];
+  const machineAvailability = new Map<string, number[]>();
+
+  equipment.forEach((eq) => {
+    const needed = equipmentTimeNeeded.get(eq.id) ?? 0;
+    const normalCapacity = eq.quantidade * 450;
+    
+    if (needed > normalCapacity && eq.quantidadeEmergencia > 0) {
+      // Need emergency machines for this equipment
+      const totalMachines = eq.quantidade + eq.quantidadeEmergencia;
+      machineAvailability.set(eq.id, Array.from({ length: totalMachines }, () => DAY_START));
+      emergencyEquipmentNames.push(eq.nome);
+    } else {
+      machineAvailability.set(eq.id, Array.from({ length: eq.quantidade }, () => DAY_START));
+    }
+  });
+
+  const usesEmergency = emergencyEquipmentNames.length > 0;
+
+  // Schedule all tasks
   const machineRowsMap = new Map<string, GanttRow<MachineTask>>();
   const machineTasks: MachineTask[] = [];
-  const overflowTasks: PlanningTask[] = [];
-  let usesEmergency = false;
 
-  const scheduleTasks = (taskList: PlanningTask[], availability: Map<string, number[]>) => {
-    taskList.forEach((task) => {
-      const avail = availability.get(task.equipmentId);
-      if (!avail || avail.length === 0) {
-        overflowTasks.push(task);
-        return;
-      }
+  tasks.forEach((task) => {
+    const eq = equipmentMap.get(task.equipmentId);
+    const avail = machineAvailability.get(task.equipmentId);
+    if (!avail || avail.length === 0 || !eq) return;
 
-      let machineIdx = 0;
-      let earliest = avail[0];
-      for (let i = 1; i < avail.length; i++) {
-        if (avail[i] < earliest) { earliest = avail[i]; machineIdx = i; }
-      }
+    let machineIdx = 0;
+    let earliest = avail[0];
+    for (let i = 1; i < avail.length; i++) {
+      if (avail[i] < earliest) { earliest = avail[i]; machineIdx = i; }
+    }
 
-      const scheduled = createSegments(earliest, task.machineDuration);
-      avail[machineIdx] = scheduled.end;
+    const scheduled = createSegments(earliest, task.machineDuration);
+    avail[machineIdx] = scheduled.end;
 
-      const label = `${task.equipmentName} ${machineIdx + 1}`;
-      const mt: MachineTask = {
-        ...task,
-        machineIndex: machineIdx,
-        machineLabel: label,
-        start: scheduled.start,
-        end: scheduled.end,
-        segments: scheduled.segments,
-      };
-      machineTasks.push(mt);
-      const row = machineRowsMap.get(label) ?? { label, tasks: [] };
-      row.tasks.push(mt);
-      machineRowsMap.set(label, row);
-    });
-  };
+    const isEmergencyMachine = machineIdx >= eq.quantidade;
+    const label = isEmergencyMachine
+      ? `${task.equipmentName} ${machineIdx + 1} ⚠️`
+      : `${task.equipmentName} ${machineIdx + 1}`;
 
-  // Schedule normal tasks first
-  const normalTasks = tasks.filter((t) => !t.isEmergency);
-  const emergencyTasks = tasks.filter((t) => t.isEmergency);
-  scheduleTasks(normalTasks, machineAvailability);
+    const mt: MachineTask = {
+      ...task,
+      machineIndex: machineIdx,
+      machineLabel: label,
+      start: scheduled.start,
+      end: scheduled.end,
+      segments: scheduled.segments,
+      isEmergencyMachine,
+    };
+    machineTasks.push(mt);
+    const row = machineRowsMap.get(label) ?? { label, tasks: [] };
+    row.tasks.push(mt);
+    machineRowsMap.set(label, row);
+  });
 
-  // Check for overflow — if tasks go past DAY_END, try emergency equipment
-  const hasOverflow = machineTasks.some((t) => t.end > DAY_END);
-  if ((hasOverflow || overflowTasks.length > 0) && emergencyEquipment.length > 0) {
-    emergencyEquipment.forEach((item) => {
-      if (!machineAvailability.has(item.id)) {
-        machineAvailability.set(item.id, Array.from({ length: item.quantidade }, () => DAY_START));
-      }
-    });
-    usesEmergency = true;
-  }
-
-  // Schedule emergency-tagged tasks
-  if (emergencyTasks.length > 0) {
-    emergencyEquipment.forEach((item) => {
-      if (!machineAvailability.has(item.id)) {
-        machineAvailability.set(item.id, Array.from({ length: item.quantidade }, () => DAY_START));
-      }
-    });
-    scheduleTasks(emergencyTasks, machineAvailability);
-    if (emergencyTasks.length > 0) usesEmergency = true;
-  }
-
-  // Sort machine rows
+  // Sort machine rows: normal first, then emergency
   const machineRows = Array.from(machineRowsMap.values()).sort((a, b) => {
-    const am = a.label.match(/^(.*) (\d+)$/);
-    const bm = b.label.match(/^(.*) (\d+)$/);
+    const aEmerg = a.label.includes("⚠️") ? 1 : 0;
+    const bEmerg = b.label.includes("⚠️") ? 1 : 0;
+    if (aEmerg !== bEmerg) return aEmerg - bEmerg;
+    const am = a.label.match(/^(.*?) (\d+)/);
+    const bm = b.label.match(/^(.*?) (\d+)/);
     return (am?.[1] ?? a.label).localeCompare(bm?.[1] ?? b.label) || Number(am?.[2] ?? 0) - Number(bm?.[2] ?? 0);
   });
 
@@ -256,8 +249,7 @@ export function buildDailyGanttSchedule({
     .filter((e) => WORKING_CODES.includes(e.code) && !e.absent)
     .map((e) => e.operator.nome);
 
-  // Fallback: if no operators from schedule, use all operators
-  const allOperatorNames = operatorNames.length > 0 ? operatorNames : 
+  const allOperatorNames = operatorNames.length > 0 ? operatorNames :
     operatorsForDate.map((e) => e.operator.nome);
 
   const operatorRowsMap = new Map<string, GanttRow<OperatorTask>>(
@@ -310,5 +302,6 @@ export function buildDailyGanttSchedule({
     operatorRows,
     axisEnd: roundUpToHalfHour(latestEnd),
     usesEmergencyEquipment: usesEmergency,
+    emergencyEquipmentNames,
   };
 }
