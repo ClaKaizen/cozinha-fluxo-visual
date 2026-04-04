@@ -249,6 +249,7 @@ export default function Planeamento() {
               const carga = getDayCarga(dateStr);
               const cap = getDayCapacidade(dateStr);
               const taxa = cap > 0 ? (carga / cap) * 100 : 0;
+              const emergEquip = getDayEmergencyEquipment(dateStr);
               return (
                 <div key={dateStr} className="rounded-lg border overflow-hidden bg-card">
                   {/* Day header */}
