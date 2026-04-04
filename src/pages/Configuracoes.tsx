@@ -260,7 +260,7 @@ export default function Configuracoes() {
                           <div className="space-y-2">
                             <Label className="text-xs font-medium">Equipamentos adicionais</Label>
                             {catForm.equipamentos.map((entry, idx) => (
-                              <div key={idx} className="flex gap-2 items-center pl-4 border-l-2 border-secondary/30">
+                              <div key={idx} className="flex gap-2 items-center pl-4 border-l-2 border-secondary/30 flex-wrap">
                                 <Select value={entry.equipamentoId} onValueChange={(v) => updateExtraEquipment(idx, { equipamentoId: v })}>
                                   <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue placeholder="Equip." /></SelectTrigger>
                                   <SelectContent>
@@ -268,7 +268,12 @@ export default function Configuracoes() {
                                   </SelectContent>
                                 </Select>
                                 <div className="w-20">
-                                  <Input type="number" value={entry.tempoCicloMaquina} onChange={(e) => updateExtraEquipment(idx, { tempoCicloMaquina: Number(e.target.value) || 0 })} className={inputCls} placeholder="T.Máq" />
+                                  <Label className="text-[10px]">T.Máq 1ª</Label>
+                                  <Input type="number" value={entry.tempoCicloMaquina1 ?? ""} onChange={(e) => updateExtraEquipment(idx, { tempoCicloMaquina1: e.target.value ? Number(e.target.value) : undefined })} className={inputCls} placeholder="min" />
+                                </div>
+                                <div className="w-20">
+                                  <Label className="text-[10px]">T.Máq Seg.</Label>
+                                  <Input type="number" value={entry.tempoCicloMaquina} onChange={(e) => updateExtraEquipment(idx, { tempoCicloMaquina: Number(e.target.value) || 0 })} className={inputCls} placeholder="min" />
                                 </div>
                                 <div className="flex items-center gap-1">
                                   <Switch checked={entry.simultaneo} onCheckedChange={(v) => updateExtraEquipment(idx, { simultaneo: v })} />

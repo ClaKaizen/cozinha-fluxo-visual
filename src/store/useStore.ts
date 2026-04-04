@@ -125,7 +125,8 @@ export const useStore = create<AppState>()(
         const ops = state.getOperatorsForDate(date);
         const temps = state.tempOperators.filter((t) => t.date === date);
 
-        // Carga: based on T. Homem only with 20% inefficiency
+        // Carga: T. Homem only with 20% inefficiency
+        // Use T. Homem 1ª for first unit + T. Homem Seg. × (QD-1) for rest
         let cargaMinutes = 0;
         prod.forEach((p) => {
           const cat = state.categories.find((c) => c.id === p.categoriaId);
@@ -138,17 +139,37 @@ export const useStore = create<AppState>()(
 
         const presentOps = ops.filter((o) => o.hours > 0);
         const pessoasPresentes = presentOps.length + temps.length;
-        const capacidadeDoDia = pessoasPresentes * 7.5 * (1 - BREAK_COEFFICIENT);
+        // Capacidade = Pessoas Presentes × 7.5h (direct, no break coefficient)
+        const capacidadeDoDia = pessoasPresentes * 7.5;
 
         // Taxa ocupação por equipamento
-        const equipMap = new Map<string, { machineMinutes: number }>();
+        // Taxa = Σ (T. Homem total + T. Máquina total) ÷ (Nº máquinas × 450 min) × 100%
+        const equipMap = new Map<string, { totalMinutes: number }>();
         prod.forEach((p) => {
           const cat = state.categories.find((c) => c.id === p.categoriaId);
           if (cat) {
-            const existing = equipMap.get(cat.equipamentoId) || { machineMinutes: 0 };
+            // Primary equipment
+            const tHomem1 = cat.tempoCicloHomem1 ?? cat.tempoCicloHomem;
             const tMaq1 = cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina;
-            existing.machineMinutes += tMaq1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloMaquina : 0);
+            const totalHomem = tHomem1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloHomem : 0);
+            const totalMaq = tMaq1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloMaquina : 0);
+            
+            const existing = equipMap.get(cat.equipamentoId) || { totalMinutes: 0 };
+            existing.totalMinutes += totalHomem + totalMaq;
             equipMap.set(cat.equipamentoId, existing);
+
+            // Additional simultaneous equipment
+            if (cat.equipamentos) {
+              cat.equipamentos.forEach((extra) => {
+                if (extra.simultaneo) {
+                  const extraMaq1 = extra.tempoCicloMaquina1 ?? extra.tempoCicloMaquina;
+                  const extraTotalMaq = extraMaq1 + (p.quantidade > 1 ? (p.quantidade - 1) * extra.tempoCicloMaquina : 0);
+                  const ex = equipMap.get(extra.equipamentoId) || { totalMinutes: 0 };
+                  ex.totalMinutes += extraTotalMaq;
+                  equipMap.set(extra.equipamentoId, ex);
+                }
+              });
+            }
           }
         });
 
@@ -156,9 +177,9 @@ export const useStore = create<AppState>()(
           .filter(eq => !eq.emergencia)
           .map((eq) => {
             const data = equipMap.get(eq.id);
-            const totalMachineMinutes = data?.machineMinutes || 0;
-            const availableMinutes = eq.quantidade * 7.5 * 60;
-            const rate = availableMinutes > 0 ? (totalMachineMinutes / availableMinutes) * 100 : 0;
+            const totalMinutes = data?.totalMinutes || 0;
+            const availableMinutes = eq.quantidade * 450; // 450 min effective per machine
+            const rate = availableMinutes > 0 ? (totalMinutes / availableMinutes) * 100 : 0;
             return { equipmentName: eq.nome, rate };
           });
 
