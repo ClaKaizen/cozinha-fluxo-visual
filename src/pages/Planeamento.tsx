@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, isToday } from "date-fns";
 import { pt } from "date-fns/locale";
-import { ChevronLeft, ChevronRight, Plus, Trash2, CalendarDays, List, Clock, Package } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Trash2, CalendarDays, List, Clock, Package, AlertTriangle } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { INEFFICIENCY_FACTOR, WORKING_CODES } from "@/store/types";
 import { Button } from "@/components/ui/button";
