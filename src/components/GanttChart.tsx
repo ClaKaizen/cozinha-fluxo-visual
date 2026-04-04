@@ -89,10 +89,14 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               {markers.map((m) => (
                 <div key={m} className={`absolute z-0 ${m % 60 === 0 ? "border-l border-border/50" : "border-l border-border/25"}`} style={{ left: labelWidth + (toPercent(m) / 100) * chartWidth, top: 0, height: totalHeight }} />
               ))}
-              {rows.map((row) => (
-                <div key={row.label} className="relative flex items-center" style={{ height: rowHeight }}>
-                  <div className="truncate pr-3 text-xs font-semibold text-foreground" style={{ width: labelWidth }}>{row.label}</div>
-                  <div className="relative h-full flex-1 border-b border-border/30 bg-muted/5" style={{ width: chartWidth }}>
+              {rows.map((row) => {
+                const isEmergencyRow = row.label.includes("⚠️");
+                return (
+                <div key={row.label} className={`relative flex items-center ${isEmergencyRow ? "bg-warning/8" : ""}`} style={{ height: rowHeight }}>
+                  <div className="truncate pr-3 text-xs font-semibold text-foreground flex items-center gap-1" style={{ width: labelWidth }}>
+                    {row.label}
+                  </div>
+                  <div className={`relative h-full flex-1 border-b border-border/30 ${isEmergencyRow ? "bg-warning/5" : "bg-muted/5"}`} style={{ width: chartWidth }}>
                     {row.tasks.map((task) =>
                       task.segments.map((seg, si) => {
                         const left = toPercent(seg.start);
