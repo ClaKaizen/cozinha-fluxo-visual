@@ -176,7 +176,10 @@ export default function Dashboard() {
         <Card className={`border-l-4 ${stats.taxaOcupacaoGlobal > 100 ? "border-l-danger" : stats.taxaOcupacaoGlobal >= 80 ? "border-l-warning" : "border-l-success"}`}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Taxa Ocupação</CardTitle>
-            <Gauge className="h-5 w-5 text-secondary" />
+            <Tooltip>
+              <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
+              <TooltipContent className="max-w-[260px] text-xs">Carga do Dia ÷ Capacidade do Dia × 100%</TooltipContent>
+            </Tooltip>
           </CardHeader>
           <CardContent>
             <div className={`text-2xl font-display font-bold ${occupancyColor(stats.taxaOcupacaoGlobal)}`}>
