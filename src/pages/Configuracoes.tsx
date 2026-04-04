@@ -89,7 +89,7 @@ export default function Configuracoes() {
   const addExtraEquipment = () => {
     setCatForm(f => ({
       ...f,
-      equipamentos: [...f.equipamentos, { equipamentoId: "", tempoCicloMaquina: 0, simultaneo: false }],
+      equipamentos: [...f.equipamentos, { equipamentoId: "", tempoCicloMaquina: 0, tempoCicloMaquina1: undefined, simultaneo: false }],
     }));
   };
 
