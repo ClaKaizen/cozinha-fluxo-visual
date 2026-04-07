@@ -72,13 +72,13 @@ export default function Dashboard() {
 
   const handleAddTemp = () => {
     if (tempName.trim()) {
-      const hours = tempShift === 'E' ? 4 : 7.5;
+      const hours = tempShift === 'E' ? 4 : 8;
       store.addTempOperator({ date: dateStr, nome: tempName.trim(), hours });
       setTempName("");
     }
   };
 
-  const pessoasNecessarias = Math.ceil(stats.cargaDoDia / 7.5);
+  const pessoasNecessarias = Math.ceil(stats.cargaDoDia / 8);
   const delta = stats.pessoasPresentes - pessoasNecessarias;
   const dimensionamentoOk = delta >= 0;
 
@@ -148,7 +148,7 @@ export default function Dashboard() {
             <CardTitle className="text-sm font-medium text-muted-foreground">Capacidade</CardTitle>
             <Tooltip>
               <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[260px] text-xs">{stats.pessoasPresentes} × 7.5h = {stats.capacidadeDoDia.toFixed(1)}h</TooltipContent>
+              <TooltipContent className="max-w-[260px] text-xs">{stats.pessoasPresentes} × 8h = {stats.capacidadeDoDia.toFixed(1)}h</TooltipContent>
             </Tooltip>
           </CardHeader>
           <CardContent>
@@ -161,7 +161,7 @@ export default function Dashboard() {
             <CardTitle className="text-sm font-medium text-muted-foreground">Pessoas Necessárias</CardTitle>
             <Tooltip>
               <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[260px] text-xs">ARREDONDAR.CIMA(Carga do Dia ÷ 7.5h) = {pessoasNecessarias}</TooltipContent>
+              <TooltipContent className="max-w-[260px] text-xs">ARREDONDAR.CIMA(Carga do Dia ÷ 8h) = {pessoasNecessarias}</TooltipContent>
             </Tooltip>
           </CardHeader>
           <CardContent>
@@ -194,7 +194,7 @@ export default function Dashboard() {
             <CardTitle className="text-sm font-medium text-muted-foreground">Ocupação Equip.</CardTitle>
             <Tooltip>
               <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[260px] text-xs">Σ(T.Homem + T.Máquina) ÷ (Nº máquinas × 450 min) × 100%</TooltipContent>
+              <TooltipContent className="max-w-[260px] text-xs">Σ(T.Homem + T.Máquina) ÷ (Nº máquinas × 480 min) × 100%</TooltipContent>
             </Tooltip>
           </CardHeader>
           <CardContent>
@@ -220,7 +220,7 @@ export default function Dashboard() {
             {operators.map((o) => {
               const isWorking = WORKING_CODES.includes(o.code) && !o.absent;
               const opHours = operatorHoursMap.get(o.operator.nome) ?? 0;
-              const opRate = isWorking ? (opHours / 7.5) * 100 : 0;
+              const opRate = isWorking ? (opHours / 8) * 100 : 0;
               return (
                 <div key={o.operator.id} className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2">
@@ -244,7 +244,7 @@ export default function Dashboard() {
             })}
             {tempOps.map((t) => {
               const opHours = operatorHoursMap.get(t.nome) ?? 0;
-              const opRate = (opHours / 7.5) * 100;
+              const opRate = (opHours / 8) * 100;
               return (
                 <div key={t.id} className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2">
