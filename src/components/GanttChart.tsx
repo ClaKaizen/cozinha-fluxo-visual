@@ -102,22 +102,24 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                         const left = toPercent(seg.start);
                         const width = ((seg.end - seg.start) / totalSpan) * 100;
                         const widthPx = (width / 100) * chartWidth;
-                        const showName = widthPx > 50;
-                        const showTime = widthPx > 100;
+                        const minWidthPx = 36;
+                        const effectiveWidthPx = Math.max(widthPx, minWidthPx);
+                        const showTime = effectiveWidthPx > 100;
                         return (
                           <div
                             key={`${task.id}-${si}`}
-                            className="absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-1.5 text-[10px] font-semibold text-foreground shadow-sm"
+                            className="absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-1 text-[10px] font-semibold text-foreground shadow-sm z-10"
                             style={{
                               left: `${left}%`,
-                              width: `${width}%`,
+                              width: effectiveWidthPx > widthPx ? `${effectiveWidthPx}px` : `${width}%`,
+                              minWidth: `${minWidthPx}px`,
                               backgroundColor: colorFill(task.colorIndex, seg.overflow),
                               borderColor: colorBorder(task.colorIndex, seg.overflow),
                               borderStyle: seg.overflow ? "dashed" : "solid",
                             }}
                             title={`${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`}
                           >
-                            {showName && <span className="truncate leading-tight">{task.artigo}</span>}
+                            <span className="truncate leading-tight">{task.artigo}</span>
                             {showTime && (
                               <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">
                                 {formatClock(task.start)}–{formatClock(task.end)}
@@ -161,13 +163,22 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
 export default function GanttChart({ schedule }: GanttChartProps) {
   const legend = useMemo(() => {
     const seen = new Map<string, { id: string; label: string; colorIndex: number }>();
+    // Collect from all machine rows to include additional equipment types
+    schedule.machineRows.forEach((row) => {
+      row.tasks.forEach((task) => {
+        if (!seen.has(task.equipmentId)) {
+          seen.set(task.equipmentId, { id: task.equipmentId, label: task.equipmentName, colorIndex: task.colorIndex });
+        }
+      });
+    });
+    // Also from task primary equipment
     schedule.tasks.forEach((task) => {
       if (!seen.has(task.equipmentId)) {
         seen.set(task.equipmentId, { id: task.equipmentId, label: task.equipmentName, colorIndex: task.colorIndex });
       }
     });
     return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label));
-  }, [schedule.tasks]);
+  }, [schedule.tasks, schedule.machineRows]);
 
   if (schedule.tasks.length === 0) {
     return (
