@@ -36,7 +36,7 @@ export interface ProductionEntry {
 export type ShiftCode = 'D' | 'E' | 'I' | 'FG' | 'F' | 'B' | 'RH' | 'K' | 'FD' | 'NT' | 'AN' | 'C';
 
 export const SHIFT_HOURS: Record<ShiftCode, number> = {
-  D: 7.5, E: 4, I: 7.5, FG: 0, F: 0, B: 0, RH: 0, K: 0, FD: 0, NT: 0, AN: 0, C: 7.5,
+  D: 8, E: 4, I: 8, FG: 0, F: 0, B: 0, RH: 0, K: 0, FD: 0, NT: 0, AN: 0, C: 8,
 };
 
 export const WORKING_CODES: ShiftCode[] = ['D', 'E', 'I', 'C'];
@@ -66,5 +66,5 @@ export interface TempOperator {
 
 export const BREAK_COEFFICIENT = 0.0625;
 export const INEFFICIENCY_FACTOR = 1.20;
-export const EFFECTIVE_HOURS = 7.5; // Direct 7.5h per operator, no break coefficient
-export const AVAILABLE_MINUTES = 450; // 07:00-15:30 (510 min) minus 60 min lunch
+export const EFFECTIVE_HOURS = 8; // Direct 8h per operator
+export const AVAILABLE_MINUTES = 480; // 07:00-16:00 (540 min) minus 60 min lunch

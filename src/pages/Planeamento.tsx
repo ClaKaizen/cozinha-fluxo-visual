@@ -35,7 +35,7 @@ export default function Planeamento() {
     const presentOps = ops.filter((o) => WORKING_CODES.includes(o.code) && !o.absent);
     const temps = store.tempOperators.filter((t) => t.date === dateStr);
     const pessoasPresentes = presentOps.length + temps.length;
-    return pessoasPresentes * 7.5;
+    return pessoasPresentes * 8;
   };
 
   const getTaxaOcupacao = (dateStr: string) => {
@@ -60,7 +60,7 @@ export default function Planeamento() {
     const emergNames: string[] = [];
     store.equipment.forEach((eq) => {
       const needed = equipTimeNeeded.get(eq.id) ?? 0;
-      if (needed > eq.quantidade * 450 && (eq.quantidadeEmergencia ?? 0) > 0) {
+      if (needed > eq.quantidade * 480 && (eq.quantidadeEmergencia ?? 0) > 0) {
         emergNames.push(eq.nome);
       }
     });
@@ -217,7 +217,7 @@ export default function Planeamento() {
                 {hasItems && (
                   <div className="mt-0.5 space-y-0.5">
                     <div className="flex items-center gap-1">
-                      <Badge variant="default" className="text-[9px] px-1 py-0 h-4 font-bold" title="Operadores necessários">{carga > 0 ? Math.ceil(carga / 7.5) : 0}</Badge>
+                      <Badge variant="default" className="text-[9px] px-1 py-0 h-4 font-bold" title="Operadores necessários">{carga > 0 ? Math.ceil(carga / 8) : 0}</Badge>
                       {emergEquip.length > 0 && <span title={`Emergência: ${emergEquip.join(", ")}`}><AlertTriangle className="h-3 w-3 text-warning" /></span>}
                     </div>
                     <div className="text-[9px] text-muted-foreground leading-tight">{carga.toFixed(1)}h carga</div>

@@ -138,7 +138,7 @@ export const useStore = create<AppState>()(
 
         const presentOps = ops.filter((o) => o.hours > 0);
         const pessoasPresentes = presentOps.length + temps.length;
-        const capacidadeDoDia = pessoasPresentes * 7.5;
+        const capacidadeDoDia = pessoasPresentes * 8;
 
         // Taxa ocupação por equipamento — use only normal quantity
         const equipMap = new Map<string, { totalMinutes: number }>();
@@ -172,7 +172,7 @@ export const useStore = create<AppState>()(
           .map((eq) => {
             const data = equipMap.get(eq.id);
             const totalMinutes = data?.totalMinutes || 0;
-            const availableMinutes = eq.quantidade * 450;
+            const availableMinutes = eq.quantidade * 480;
             const rate = availableMinutes > 0 ? (totalMinutes / availableMinutes) * 100 : 0;
             return { equipmentName: eq.nome, rate };
           });
