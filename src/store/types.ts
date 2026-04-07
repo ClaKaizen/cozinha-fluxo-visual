@@ -66,5 +66,5 @@ export interface TempOperator {
 
 export const BREAK_COEFFICIENT = 0.0625;
 export const INEFFICIENCY_FACTOR = 1.20;
-export const EFFECTIVE_HOURS = 7.5; // Direct 7.5h per operator, no break coefficient
-export const AVAILABLE_MINUTES = 450; // 07:00-15:30 (510 min) minus 60 min lunch
+export const EFFECTIVE_HOURS = 8; // Direct 8h per operator
+export const AVAILABLE_MINUTES = 480; // 07:00-16:00 (540 min) minus 60 min lunch

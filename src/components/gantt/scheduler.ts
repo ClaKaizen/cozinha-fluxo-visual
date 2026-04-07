@@ -182,7 +182,7 @@ export function buildDailyGanttSchedule({
 
   equipment.forEach((eq) => {
     const needed = equipmentTimeNeeded.get(eq.id) ?? 0;
-    const normalCapacity = eq.quantidade * 450;
+    const normalCapacity = eq.quantidade * 480;
     
     if (needed > normalCapacity && eq.quantidadeEmergencia > 0) {
       // Need emergency machines for this equipment
