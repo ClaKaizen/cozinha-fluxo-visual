@@ -60,7 +60,7 @@ export default function Planeamento() {
     const emergNames: string[] = [];
     store.equipment.forEach((eq) => {
       const needed = equipTimeNeeded.get(eq.id) ?? 0;
-      if (needed > eq.quantidade * 450 && (eq.quantidadeEmergencia ?? 0) > 0) {
+      if (needed > eq.quantidade * 480 && (eq.quantidadeEmergencia ?? 0) > 0) {
         emergNames.push(eq.nome);
       }
     });

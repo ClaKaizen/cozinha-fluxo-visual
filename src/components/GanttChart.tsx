@@ -148,7 +148,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="h-3 w-3 rounded-sm border border-border border-dashed bg-muted/30" />
-                <span className="text-muted-foreground">Overflow após 15:30</span>
+                <span className="text-muted-foreground">Overflow após 16:00</span>
               </div>
             </div>
           </div>
