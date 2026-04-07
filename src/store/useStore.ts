@@ -172,7 +172,7 @@ export const useStore = create<AppState>()(
           .map((eq) => {
             const data = equipMap.get(eq.id);
             const totalMinutes = data?.totalMinutes || 0;
-            const availableMinutes = eq.quantidade * 450;
+            const availableMinutes = eq.quantidade * 480;
             const rate = availableMinutes > 0 ? (totalMinutes / availableMinutes) * 100 : 0;
             return { equipmentName: eq.nome, rate };
           });
