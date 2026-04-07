@@ -163,13 +163,22 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
 export default function GanttChart({ schedule }: GanttChartProps) {
   const legend = useMemo(() => {
     const seen = new Map<string, { id: string; label: string; colorIndex: number }>();
+    // Collect from all machine rows to include additional equipment types
+    schedule.machineRows.forEach((row) => {
+      row.tasks.forEach((task) => {
+        if (!seen.has(task.equipmentId)) {
+          seen.set(task.equipmentId, { id: task.equipmentId, label: task.equipmentName, colorIndex: task.colorIndex });
+        }
+      });
+    });
+    // Also from task primary equipment
     schedule.tasks.forEach((task) => {
       if (!seen.has(task.equipmentId)) {
         seen.set(task.equipmentId, { id: task.equipmentId, label: task.equipmentName, colorIndex: task.colorIndex });
       }
     });
     return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label));
-  }, [schedule.tasks]);
+  }, [schedule.tasks, schedule.machineRows]);
 
   if (schedule.tasks.length === 0) {
     return (
