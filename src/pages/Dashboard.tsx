@@ -194,7 +194,7 @@ export default function Dashboard() {
             <CardTitle className="text-sm font-medium text-muted-foreground">Ocupação Equip.</CardTitle>
             <Tooltip>
               <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[260px] text-xs">Σ(T.Homem + T.Máquina) ÷ (Nº máquinas × 480 min) × 100%</TooltipContent>
+              <TooltipContent className="max-w-[260px] text-xs">Σ(T.Homem + T.Máquina) ÷ ((Normal + Emerg.) × 480 min) × 100%. ⚠️ = requer equipamento de emergência</TooltipContent>
             </Tooltip>
           </CardHeader>
           <CardContent>
@@ -202,7 +202,10 @@ export default function Dashboard() {
               {stats.taxaOcupacao.map((eq) => (
                 <div key={eq.equipmentName} className={`flex items-center justify-between text-xs px-1.5 py-0.5 rounded ${occupancyBg(eq.rate)}`}>
                   <span className="font-medium truncate">{eq.equipmentName}</span>
-                  <span className={`font-bold ${occupancyColor(eq.rate)}`}>{eq.rate.toFixed(0)}%</span>
+                  <span className={`font-bold ${occupancyColor(eq.rate)}`}>
+                    {eq.usesEmergency && <AlertTriangle className="inline h-3 w-3 text-warning mr-0.5 -mt-0.5" />}
+                    {eq.rate.toFixed(0)}%
+                  </span>
                 </div>
               ))}
             </div>

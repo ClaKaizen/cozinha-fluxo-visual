@@ -42,7 +42,7 @@ interface AppState {
     cargaDoDia: number;
     pessoasPresentes: number;
     capacidadeDoDia: number;
-    taxaOcupacao: { equipmentName: string; rate: number }[];
+    taxaOcupacao: { equipmentName: string; rate: number; usesEmergency: boolean }[];
     taxaOcupacaoGlobal: number;
   };
   getArtigoCategory: (artigo: string) => string | undefined;
@@ -172,9 +172,12 @@ export const useStore = create<AppState>()(
           .map((eq) => {
             const data = equipMap.get(eq.id);
             const totalMinutes = data?.totalMinutes || 0;
-            const availableMinutes = eq.quantidade * 480;
+            const totalMachines = eq.quantidade + (eq.quantidadeEmergencia || 0);
+            const availableMinutes = totalMachines * 480;
+            const normalAvailable = eq.quantidade * 480;
+            const usesEmergency = totalMinutes > normalAvailable && (eq.quantidadeEmergencia || 0) > 0;
             const rate = availableMinutes > 0 ? (totalMinutes / availableMinutes) * 100 : 0;
-            return { equipmentName: eq.nome, rate };
+            return { equipmentName: eq.nome, rate, usesEmergency };
           });
 
         const taxaOcupacaoGlobal = capacidadeDoDia > 0 ? (cargaDoDia / capacidadeDoDia) * 100 : 0;
