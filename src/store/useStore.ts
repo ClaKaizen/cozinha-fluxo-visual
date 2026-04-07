@@ -42,7 +42,7 @@ interface AppState {
     cargaDoDia: number;
     pessoasPresentes: number;
     capacidadeDoDia: number;
-    taxaOcupacao: { equipmentName: string; rate: number }[];
+    taxaOcupacao: { equipmentName: string; rate: number; usesEmergency: boolean }[];
     taxaOcupacaoGlobal: number;
   };
   getArtigoCategory: (artigo: string) => string | undefined;
