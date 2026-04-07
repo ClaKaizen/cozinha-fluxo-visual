@@ -138,7 +138,7 @@ export const useStore = create<AppState>()(
 
         const presentOps = ops.filter((o) => o.hours > 0);
         const pessoasPresentes = presentOps.length + temps.length;
-        const capacidadeDoDia = pessoasPresentes * 7.5;
+        const capacidadeDoDia = pessoasPresentes * 8;
 
         // Taxa ocupação por equipamento — use only normal quantity
         const equipMap = new Map<string, { totalMinutes: number }>();
