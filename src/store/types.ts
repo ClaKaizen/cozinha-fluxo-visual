@@ -36,7 +36,7 @@ export interface ProductionEntry {
 export type ShiftCode = 'D' | 'E' | 'I' | 'FG' | 'F' | 'B' | 'RH' | 'K' | 'FD' | 'NT' | 'AN' | 'C';
 
 export const SHIFT_HOURS: Record<ShiftCode, number> = {
-  D: 7.5, E: 4, I: 7.5, FG: 0, F: 0, B: 0, RH: 0, K: 0, FD: 0, NT: 0, AN: 0, C: 7.5,
+  D: 8, E: 4, I: 8, FG: 0, F: 0, B: 0, RH: 0, K: 0, FD: 0, NT: 0, AN: 0, C: 8,
 };
 
 export const WORKING_CODES: ShiftCode[] = ['D', 'E', 'I', 'C'];
