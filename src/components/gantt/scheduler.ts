@@ -19,6 +19,14 @@ export interface TimelineSegment {
   overflow: boolean;
 }
 
+export interface MachineBooking {
+  equipmentId: string;
+  equipmentName: string;
+  duration: number;
+  simultaneous: boolean; // true = runs at same time as primary
+  colorIndex: number;
+}
+
 export interface PlanningTask {
   id: string;
   artigo: string;
@@ -30,6 +38,7 @@ export interface PlanningTask {
   operatorDuration: number;
   colorIndex: number;
   isEmergency: boolean;
+  machineBookings: MachineBooking[];
 }
 
 export interface MachineTask extends PlanningTask {
@@ -137,7 +146,7 @@ export function buildDailyGanttSchedule({
   const categoryMap = new Map(categories.map((item) => [item.id, item]));
   const equipmentMap = new Map(equipment.map((item) => [item.id, item]));
 
-  // Expand production into per-dose tasks
+  // Expand production into per-dose tasks with multi-equipment bookings
   const tasks: PlanningTask[] = [];
   production
     .filter((entry) => normalizeDateKey(entry.date) === selectedDate)
@@ -147,10 +156,52 @@ export function buildDailyGanttSchedule({
       if (!cat || !machine) return;
 
       for (let i = 0; i < entry.quantidade; i++) {
-        const tHomem = i === 0 ? (cat.tempoCicloHomem1 ?? cat.tempoCicloHomem) : cat.tempoCicloHomem;
-        const tMaq = i === 0 ? (cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina) : cat.tempoCicloMaquina;
-        const duration = tHomem + tMaq;
-        if (duration <= 0) continue;
+        const isFirst = i === 0;
+        const tHomem = isFirst ? (cat.tempoCicloHomem1 ?? cat.tempoCicloHomem) : cat.tempoCicloHomem;
+        const tMaqPrimary = isFirst ? (cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina) : cat.tempoCicloMaquina;
+
+        // Build machine bookings: primary + additional equipment
+        const bookings: MachineBooking[] = [];
+
+        // Primary equipment booking (always simultaneous=true as it's the reference)
+        if (tMaqPrimary > 0) {
+          bookings.push({
+            equipmentId: machine.id,
+            equipmentName: machine.nome,
+            duration: tMaqPrimary,
+            simultaneous: true,
+            colorIndex: (equipmentIndex.get(machine.id) ?? 0) % 6,
+          });
+        }
+
+        // Additional equipment from category config
+        if (cat.equipamentos && cat.equipamentos.length > 0) {
+          for (const extra of cat.equipamentos) {
+            const extraEq = equipmentMap.get(extra.equipamentoId);
+            if (!extraEq) continue;
+            const extraDuration = isFirst
+              ? (extra.tempoCicloMaquina1 ?? extra.tempoCicloMaquina)
+              : extra.tempoCicloMaquina;
+            if (extraDuration <= 0) continue;
+            bookings.push({
+              equipmentId: extraEq.id,
+              equipmentName: extraEq.nome,
+              duration: extraDuration,
+              simultaneous: extra.simultaneo,
+              colorIndex: (equipmentIndex.get(extraEq.id) ?? 0) % 6,
+            });
+          }
+        }
+
+        // Calculate wall-clock machine duration:
+        // Sequential bookings run one after another, simultaneous ones overlap
+        const seqBookings = bookings.filter((b) => !b.simultaneous);
+        const simBookings = bookings.filter((b) => b.simultaneous);
+        const seqTotal = seqBookings.reduce((s, b) => s + b.duration, 0);
+        const simMax = simBookings.length > 0 ? Math.max(...simBookings.map((b) => b.duration)) : 0;
+        const totalMachineDuration = seqTotal + simMax;
+        const duration = tHomem + totalMachineDuration;
+        if (duration <= 0 && bookings.length === 0) continue;
 
         tasks.push({
           id: `${entry.id}-d${i}`,
@@ -159,10 +210,17 @@ export function buildDailyGanttSchedule({
           equipmentId: machine.id,
           equipmentName: machine.nome,
           categoryName: cat.nome,
-          machineDuration: duration,
+          machineDuration: totalMachineDuration > 0 ? totalMachineDuration : tMaqPrimary,
           operatorDuration: tHomem,
           colorIndex: (equipmentIndex.get(machine.id) ?? 0) % 6,
           isEmergency: false,
+          machineBookings: bookings.length > 0 ? bookings : [{
+            equipmentId: machine.id,
+            equipmentName: machine.nome,
+            duration: tMaqPrimary,
+            simultaneous: true,
+            colorIndex: (equipmentIndex.get(machine.id) ?? 0) % 6,
+          }],
         });
       }
     });
@@ -172,9 +230,12 @@ export function buildDailyGanttSchedule({
   }
 
   // Step 1: Check per-equipment if normal capacity suffices
+  // Accumulate time needed per equipment from all bookings
   const equipmentTimeNeeded = new Map<string, number>();
   tasks.forEach((t) => {
-    equipmentTimeNeeded.set(t.equipmentId, (equipmentTimeNeeded.get(t.equipmentId) ?? 0) + t.machineDuration);
+    for (const booking of t.machineBookings) {
+      equipmentTimeNeeded.set(booking.equipmentId, (equipmentTimeNeeded.get(booking.equipmentId) ?? 0) + booking.duration);
+    }
   });
 
   const emergencyEquipmentNames: string[] = [];
@@ -185,7 +246,6 @@ export function buildDailyGanttSchedule({
     const normalCapacity = eq.quantidade * 480;
     
     if (needed > normalCapacity && eq.quantidadeEmergencia > 0) {
-      // Need emergency machines for this equipment
       const totalMachines = eq.quantidade + eq.quantidadeEmergencia;
       machineAvailability.set(eq.id, Array.from({ length: totalMachines }, () => DAY_START));
       emergencyEquipmentNames.push(eq.nome);
@@ -196,31 +256,40 @@ export function buildDailyGanttSchedule({
 
   const usesEmergency = emergencyEquipmentNames.length > 0;
 
-  // Schedule all tasks
+  // Schedule all tasks — handle multi-equipment bookings
   const machineRowsMap = new Map<string, GanttRow<MachineTask>>();
   const machineTasks: MachineTask[] = [];
 
-  tasks.forEach((task) => {
-    const eq = equipmentMap.get(task.equipmentId);
-    const avail = machineAvailability.get(task.equipmentId);
-    if (!avail || avail.length === 0 || !eq) return;
+  function scheduleBookingOnEquipment(
+    booking: MachineBooking,
+    task: PlanningTask,
+    minStart: number,
+  ): MachineTask | null {
+    const eq = equipmentMap.get(booking.equipmentId);
+    const avail = machineAvailability.get(booking.equipmentId);
+    if (!avail || avail.length === 0 || !eq) return null;
 
+    // Find earliest machine that is available at or after minStart
     let machineIdx = 0;
-    let earliest = avail[0];
-    for (let i = 1; i < avail.length; i++) {
-      if (avail[i] < earliest) { earliest = avail[i]; machineIdx = i; }
+    let earliest = Math.max(avail[0], minStart);
+    for (let j = 1; j < avail.length; j++) {
+      const candidate = Math.max(avail[j], minStart);
+      if (candidate < earliest) { earliest = candidate; machineIdx = j; }
     }
 
-    const scheduled = createSegments(earliest, task.machineDuration);
+    const scheduled = createSegments(earliest, booking.duration);
     avail[machineIdx] = scheduled.end;
 
     const isEmergencyMachine = machineIdx >= eq.quantidade;
     const label = isEmergencyMachine
-      ? `${task.equipmentName} ${machineIdx + 1} ⚠️`
-      : `${task.equipmentName} ${machineIdx + 1}`;
+      ? `${booking.equipmentName} ${machineIdx + 1} ⚠️`
+      : `${booking.equipmentName} ${machineIdx + 1}`;
 
     const mt: MachineTask = {
       ...task,
+      equipmentId: booking.equipmentId,
+      equipmentName: booking.equipmentName,
+      colorIndex: booking.colorIndex,
       machineIndex: machineIdx,
       machineLabel: label,
       start: scheduled.start,
@@ -232,6 +301,36 @@ export function buildDailyGanttSchedule({
     const row = machineRowsMap.get(label) ?? { label, tasks: [] };
     row.tasks.push(mt);
     machineRowsMap.set(label, row);
+    return mt;
+  }
+
+  tasks.forEach((task) => {
+    const seqBookings = task.machineBookings.filter((b) => !b.simultaneous);
+    const simBookings = task.machineBookings.filter((b) => b.simultaneous);
+
+    // Schedule sequential bookings first, one after the other
+    let cursor = DAY_START;
+    // Find the earliest any involved equipment is available
+    for (const booking of task.machineBookings) {
+      const avail = machineAvailability.get(booking.equipmentId);
+      if (avail) {
+        const minAvail = Math.min(...avail);
+        cursor = Math.max(cursor, minAvail);
+      }
+    }
+    // Actually, for proper scheduling we need to find the earliest slot per equipment
+    // Start with the earliest possible
+    let seqEnd = normalizeCursor(cursor);
+
+    for (const booking of seqBookings) {
+      const mt = scheduleBookingOnEquipment(booking, task, seqEnd);
+      if (mt) seqEnd = mt.end;
+    }
+
+    // Schedule simultaneous bookings all starting from seqEnd
+    for (const booking of simBookings) {
+      scheduleBookingOnEquipment(booking, task, seqEnd);
+    }
   });
 
   // Sort machine rows: normal first, then emergency
