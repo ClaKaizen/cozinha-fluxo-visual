@@ -11,7 +11,7 @@ import {
 export const DAY_START = 7 * 60;   // 420
 export const LUNCH_START = 13 * 60; // 780
 export const LUNCH_END = 14 * 60;   // 840
-export const DAY_END = 15 * 60 + 30; // 930
+export const DAY_END = 16 * 60;       // 960
 
 export interface TimelineSegment {
   start: number;
