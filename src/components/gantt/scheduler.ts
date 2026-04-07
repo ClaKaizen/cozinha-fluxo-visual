@@ -19,6 +19,14 @@ export interface TimelineSegment {
   overflow: boolean;
 }
 
+export interface MachineBooking {
+  equipmentId: string;
+  equipmentName: string;
+  duration: number;
+  simultaneous: boolean; // true = runs at same time as primary
+  colorIndex: number;
+}
+
 export interface PlanningTask {
   id: string;
   artigo: string;
@@ -30,6 +38,7 @@ export interface PlanningTask {
   operatorDuration: number;
   colorIndex: number;
   isEmergency: boolean;
+  machineBookings: MachineBooking[];
 }
 
 export interface MachineTask extends PlanningTask {
