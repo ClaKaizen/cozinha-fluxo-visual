@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { format, addDays, subDays } from "date-fns";
 import { pt } from "date-fns/locale";
-import { ChevronLeft, ChevronRight, Users, Activity, UserMinus, UserPlus, Info, UserCheck, AlertTriangle, Gauge } from "lucide-react";
+import { ChevronLeft, ChevronRight, Users, Activity, UserMinus, UserPlus, Info, UserCheck, AlertTriangle, Gauge, CheckCircle, XCircle } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { WORKING_CODES, EFFECTIVE_HOURS, AVAILABLE_MINUTES } from "@/store/types";
 import { Button } from "@/components/ui/button";
@@ -127,7 +127,7 @@ export default function Dashboard() {
       )}
 
       {/* KPI Cards - 6 cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4">
         <Card className="border-l-4 border-l-primary">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Carga do Dia</CardTitle>
@@ -217,6 +217,30 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Overtime KPI */}
+        <Card className={`border-l-4 ${schedule.hasOvertime ? "border-l-danger" : "border-l-success"}`}>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Overtime</CardTitle>
+            <Tooltip>
+              <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
+              <TooltipContent className="max-w-[260px] text-xs">Existem tarefas não concluídas antes das 16h ou operadores com carga &gt; 100%</TooltipContent>
+            </Tooltip>
+          </CardHeader>
+          <CardContent>
+            {schedule.hasOvertime ? (
+              <div className="flex items-center gap-1.5">
+                <XCircle className="h-5 w-5 text-danger" />
+                <span className="text-lg font-display font-bold text-danger">Com overtime</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <CheckCircle className="h-5 w-5 text-success" />
+                <span className="text-lg font-display font-bold text-success">Sem overtime</span>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

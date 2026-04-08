@@ -4,6 +4,7 @@ import { pt } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, Plus, Trash2, CalendarDays, List, Clock, Package, AlertTriangle } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { INEFFICIENCY_FACTOR, WORKING_CODES } from "@/store/types";
+import { buildDailyGanttSchedule, normalizeDateKey } from "@/components/gantt/scheduler";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -65,6 +66,21 @@ export default function Planeamento() {
       }
     });
     return emergNames;
+  };
+
+  const getDayHasOvertime = (dateStr: string): boolean => {
+    const prod = store.production.filter((p) => p.date === dateStr);
+    if (prod.length === 0) return false;
+    const ops = store.getOperatorsForDate(dateStr);
+    const sched = buildDailyGanttSchedule({
+      dateStr: normalizeDateKey(dateStr),
+      production: store.production,
+      categories: store.categories,
+      equipment: store.equipment,
+      operatorsForDate: ops,
+      tempOperators: store.tempOperators,
+    });
+    return sched.hasOvertime;
   };
 
   const taxaColor = (rate: number) => {
@@ -201,9 +217,17 @@ export default function Planeamento() {
             const cap = getDayCapacidade(dateStr);
             const taxa = getTaxaOcupacao(dateStr);
             const emergEquip = getDayEmergencyEquipment(dateStr);
+            const hasOvertime = getDayHasOvertime(dateStr);
             const isSelected = selectedDate === dateStr;
             const isTodayDate = isToday(day);
             const hasItems = count > 0;
+
+            // Badge color: red if overtime, green if ok, default if no items
+            const badgeClass = hasItems
+              ? hasOvertime
+                ? "bg-destructive text-destructive-foreground"
+                : "bg-success text-success-foreground"
+              : "";
 
             return (
               <button
@@ -217,7 +241,7 @@ export default function Planeamento() {
                 {hasItems && (
                   <div className="mt-0.5 space-y-0.5">
                     <div className="flex items-center gap-1">
-                      <Badge variant="default" className="text-[9px] px-1 py-0 h-4 font-bold" title="Operadores necessários">{carga > 0 ? Math.ceil(carga / 8) : 0}</Badge>
+                      <Badge variant="default" className={`text-[9px] px-1 py-0 h-4 font-bold ${badgeClass}`} title="Operadores necessários">{carga > 0 ? Math.ceil(carga / 8) : 0}</Badge>
                       {emergEquip.length > 0 && <span title={`Emergência: ${emergEquip.join(", ")}`}><AlertTriangle className="h-3 w-3 text-warning" /></span>}
                     </div>
                     <div className="text-[9px] text-muted-foreground leading-tight">{carga.toFixed(1)}h carga</div>
