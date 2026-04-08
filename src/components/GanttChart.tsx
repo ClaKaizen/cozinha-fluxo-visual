@@ -92,13 +92,18 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                 <div key={m} className={`absolute z-0 ${m % 60 === 0 ? "border-l border-border/50" : "border-l border-border/25"}`} style={{ left: labelWidth + (toPercent(m) / 100) * chartWidth, top: 0, height: totalHeight }} />
               ))}
               {rows.map((row) => {
-                const isEmergencyRow = row.label.includes("⚠️");
+                const isEmergency = isEmergencyRowFn(row.label);
                 return (
-                <div key={row.label} className={`relative flex items-center ${isEmergencyRow ? "bg-warning/8" : ""}`} style={{ height: rowHeight }}>
+                <div key={row.label} className={`relative flex items-center ${isEmergency ? "bg-orange-50 dark:bg-orange-950/20" : ""}`} style={{ height: rowHeight }}>
                   <div className="truncate pr-3 text-xs font-semibold text-foreground flex items-center gap-1" style={{ width: labelWidth }}>
-                    {row.label}
+                    {isEmergency ? (
+                      <>
+                        <span>{row.label.replace(" ⚠️", "")}</span>
+                        <span className="inline-flex items-center rounded border border-orange-400 bg-orange-100 dark:bg-orange-900/40 px-1 py-0 text-[8px] font-bold text-orange-700 dark:text-orange-300 leading-tight">Emerg.</span>
+                      </>
+                    ) : row.label}
                   </div>
-                  <div className={`relative h-full flex-1 border-b border-border/30 ${isEmergencyRow ? "bg-warning/5" : "bg-muted/5"}`} style={{ width: chartWidth }}>
+                  <div className={`relative h-full flex-1 border-b ${isEmergency ? "border-dashed border-orange-400/50 bg-orange-50/50 dark:bg-orange-950/10" : "border-border/30 bg-muted/5"}`} style={{ width: chartWidth }}>
                     {row.tasks.map((task) =>
                       task.segments.map((seg, si) => {
                         const left = toPercent(seg.start);
@@ -107,21 +112,24 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                         const minWidthPx = 36;
                         const effectiveWidthPx = Math.max(widthPx, minWidthPx);
                         const showTime = effectiveWidthPx > 100;
+                        const isOverflow = seg.overflow;
                         return (
                           <div
                             key={`${task.id}-${si}`}
-                            className="absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-1 text-[10px] font-semibold text-foreground shadow-sm z-10"
+                            className={`absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-1 text-[10px] font-semibold text-foreground shadow-sm z-10 ${isOverflow ? "border-dashed border-red-500 bg-red-100/60 dark:bg-red-900/30" : ""}`}
                             style={{
                               left: `${left}%`,
                               width: effectiveWidthPx > widthPx ? `${effectiveWidthPx}px` : `${width}%`,
                               minWidth: `${minWidthPx}px`,
-                              backgroundColor: colorFill(task.colorIndex, seg.overflow),
-                              borderColor: colorBorder(task.colorIndex, seg.overflow),
-                              borderStyle: seg.overflow ? "dashed" : "solid",
+                              ...(isOverflow ? {} : {
+                                backgroundColor: colorFill(task.colorIndex, false),
+                                borderColor: colorBorder(task.colorIndex, false),
+                                borderStyle: (task as MachineTask).isEmergencyMachine ? "dashed" : "solid",
+                              }),
                             }}
                             title={`${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`}
                           >
-                            <span className="truncate leading-tight">{task.artigo}</span>
+                            <span className="truncate leading-tight">{isOverflow ? `⚠ ${task.artigo}` : task.artigo}</span>
                             {showTime && (
                               <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">
                                 {formatClock(task.start)}–{formatClock(task.end)}
