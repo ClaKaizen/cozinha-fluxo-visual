@@ -217,9 +217,17 @@ export default function Planeamento() {
             const cap = getDayCapacidade(dateStr);
             const taxa = getTaxaOcupacao(dateStr);
             const emergEquip = getDayEmergencyEquipment(dateStr);
+            const hasOvertime = getDayHasOvertime(dateStr);
             const isSelected = selectedDate === dateStr;
             const isTodayDate = isToday(day);
             const hasItems = count > 0;
+
+            // Badge color: red if overtime, green if ok, default if no items
+            const badgeClass = hasItems
+              ? hasOvertime
+                ? "bg-destructive text-destructive-foreground"
+                : "bg-success text-success-foreground"
+              : "";
 
             return (
               <button
@@ -233,7 +241,7 @@ export default function Planeamento() {
                 {hasItems && (
                   <div className="mt-0.5 space-y-0.5">
                     <div className="flex items-center gap-1">
-                      <Badge variant="default" className="text-[9px] px-1 py-0 h-4 font-bold" title="Operadores necessários">{carga > 0 ? Math.ceil(carga / 8) : 0}</Badge>
+                      <Badge variant="default" className={`text-[9px] px-1 py-0 h-4 font-bold ${badgeClass}`} title="Operadores necessários">{carga > 0 ? Math.ceil(carga / 8) : 0}</Badge>
                       {emergEquip.length > 0 && <span title={`Emergência: ${emergEquip.join(", ")}`}><AlertTriangle className="h-3 w-3 text-warning" /></span>}
                     </div>
                     <div className="text-[9px] text-muted-foreground leading-tight">{carga.toFixed(1)}h carga</div>
