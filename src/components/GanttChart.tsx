@@ -4,8 +4,6 @@ import {
   DAY_END,
   DAY_START,
   formatClock,
-  LUNCH_END,
-  LUNCH_START,
   type DailyGanttSchedule,
   type GanttRow,
   type MachineTask,
@@ -42,8 +40,10 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
   axisEnd: number;
   emptyMessage: string;
   legend: { id: string; label: string; colorIndex: number }[];
+  lunchStart: number;
+  lunchEnd: number;
 }) {
-  const { title, rows, axisEnd, emptyMessage, legend } = props;
+  const { title, rows, axisEnd, emptyMessage, legend, lunchStart, lunchEnd } = props;
 
   if (rows.length === 0) {
     return (
@@ -67,9 +67,12 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
   const chartWidth = Math.max(760, totalSpan * pixelsPerMinute);
   const toPercent = (minutes: number) => ((minutes - DAY_START) / totalSpan) * 100;
   const markers = Array.from({ length: Math.floor((axisEnd - DAY_START) / 30) + 1 }, (_, i) => DAY_START + i * 30);
-  const lunchLeft = toPercent(LUNCH_START);
-  const lunchWidth = ((LUNCH_END - LUNCH_START) / totalSpan) * 100;
+  const lunchLeft = toPercent(lunchStart);
+  const lunchWidth = ((lunchEnd - lunchStart) / totalSpan) * 100;
   const totalHeight = rows.length * rowHeight;
+
+  // 16:00 hard stop line
+  const hardStopLeft = toPercent(DAY_END);
 
   return (
     <Card>
@@ -87,7 +90,10 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               ))}
             </div>
             <div className="relative">
+              {/* Lunch break band */}
               <div className="absolute z-0 rounded bg-muted/60" style={{ left: labelWidth + (lunchLeft / 100) * chartWidth, width: (lunchWidth / 100) * chartWidth, top: 0, height: totalHeight }} />
+              {/* 16:00 hard stop line */}
+              <div className="absolute z-[5]" style={{ left: labelWidth + (hardStopLeft / 100) * chartWidth, top: 0, height: totalHeight, width: 2, backgroundColor: 'hsl(var(--destructive))' }} />
               {markers.map((m) => (
                 <div key={m} className={`absolute z-0 ${m % 60 === 0 ? "border-l border-border/50" : "border-l border-border/25"}`} style={{ left: labelWidth + (toPercent(m) / 100) * chartWidth, top: 0, height: totalHeight }} />
               ))}
@@ -121,7 +127,9 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                               left: `${left}%`,
                               width: effectiveWidthPx > widthPx ? `${effectiveWidthPx}px` : `${width}%`,
                               minWidth: `${minWidthPx}px`,
-                              ...(isOverflow ? {} : {
+                              ...(isOverflow ? {
+                                backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(239,68,68,0.15) 4px, rgba(239,68,68,0.15) 8px)',
+                              } : {
                                 backgroundColor: colorFill(task.colorIndex, false),
                                 borderColor: colorBorder(task.colorIndex, false),
                                 borderStyle: (task as unknown as MachineTask).isEmergencyMachine ? "dashed" : "solid",
@@ -132,7 +140,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                             <span className="truncate leading-tight">{isOverflow ? `⚠ ${task.artigo}` : task.artigo}</span>
                             {showTime && (
                               <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">
-                                {formatClock(task.start)}–{formatClock(task.end)}
+                                {formatClock(seg.start)}–{formatClock(seg.end)}
                               </span>
                             )}
                           </div>
@@ -156,7 +164,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               })}
               <div className="flex items-center gap-1.5">
                 <div className="h-3 w-3 rounded-sm bg-muted" />
-                <span className="text-muted-foreground">Almoço 13:00–14:00</span>
+                <span className="text-muted-foreground">Almoço {formatClock(lunchStart)}–{formatClock(lunchEnd)}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="h-3 w-3 rounded-sm border border-dashed border-orange-400 bg-orange-100" />
@@ -177,7 +185,6 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
 export default function GanttChart({ schedule }: GanttChartProps) {
   const legend = useMemo(() => {
     const seen = new Map<string, { id: string; label: string; colorIndex: number }>();
-    // Collect from all machine rows to include additional equipment types
     schedule.machineRows.forEach((row) => {
       row.tasks.forEach((task) => {
         if (!seen.has(task.equipmentId)) {
@@ -185,7 +192,6 @@ export default function GanttChart({ schedule }: GanttChartProps) {
         }
       });
     });
-    // Also from task primary equipment
     schedule.tasks.forEach((task) => {
       if (!seen.has(task.equipmentId)) {
         seen.set(task.equipmentId, { id: task.equipmentId, label: task.equipmentName, colorIndex: task.colorIndex });
@@ -203,7 +209,7 @@ export default function GanttChart({ schedule }: GanttChartProps) {
     );
   }
 
-  const sharedAxisEnd = Math.max(schedule.axisEnd, DAY_END);
+  const sharedAxisEnd = Math.max(schedule.axisEnd, DAY_END + 30); // extend to 16:30 for overflow visibility
 
   return (
     <div className="space-y-4">
@@ -213,6 +219,8 @@ export default function GanttChart({ schedule }: GanttChartProps) {
         axisEnd={sharedAxisEnd}
         emptyMessage="Sem máquinas utilizadas neste dia."
         legend={legend}
+        lunchStart={schedule.lunchStart}
+        lunchEnd={schedule.lunchEnd}
       />
       <GanttSection<OperatorTask>
         title="Ocupação dos Operadores"
@@ -220,7 +228,27 @@ export default function GanttChart({ schedule }: GanttChartProps) {
         axisEnd={sharedAxisEnd}
         emptyMessage="Sem operadores presentes na Escala para este dia."
         legend={legend}
+        lunchStart={schedule.lunchStart}
+        lunchEnd={schedule.lunchEnd}
       />
+
+      {/* Unscheduled tasks warning */}
+      {schedule.unscheduledTasks.length > 0 && (
+        <Card className="border-destructive/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-display text-destructive">Tarefas não planeadas por falta de capacidade</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="text-sm space-y-1">
+              {schedule.unscheduledTasks.map((u, i) => (
+                <li key={i} className="text-destructive">
+                  <span className="font-medium">{u.artigo}</span> — {u.dosesRemaining} dose{u.dosesRemaining > 1 ? "s" : ""} não atribuída{u.dosesRemaining > 1 ? "s" : ""}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
