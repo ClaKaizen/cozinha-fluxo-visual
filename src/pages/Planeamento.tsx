@@ -4,6 +4,7 @@ import { pt } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, Plus, Trash2, CalendarDays, List, Clock, Package, AlertTriangle } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { INEFFICIENCY_FACTOR, WORKING_CODES } from "@/store/types";
+import { buildDailyGanttSchedule, normalizeDateKey } from "@/components/gantt/scheduler";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
