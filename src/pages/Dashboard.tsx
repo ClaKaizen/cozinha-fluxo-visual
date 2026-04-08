@@ -118,6 +118,14 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Overflow warning */}
+      {schedule.overflowTasks && schedule.overflowTasks.length > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive">
+          <AlertTriangle className="h-5 w-5" />
+          <span>⚠️ Tarefas em overflow (após 16:00): {schedule.overflowTasks.join(", ")}</span>
+        </div>
+      )}
+
       {/* KPI Cards - 6 cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <Card className="border-l-4 border-l-primary">
