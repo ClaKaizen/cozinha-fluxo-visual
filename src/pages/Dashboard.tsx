@@ -219,6 +219,30 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Overtime KPI */}
+        <Card className={`border-l-4 ${schedule.hasOvertime ? "border-l-danger" : "border-l-success"}`}>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Overtime</CardTitle>
+            <Tooltip>
+              <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
+              <TooltipContent className="max-w-[260px] text-xs">Existem tarefas não concluídas antes das 16h ou operadores com carga &gt; 100%</TooltipContent>
+            </Tooltip>
+          </CardHeader>
+          <CardContent>
+            {schedule.hasOvertime ? (
+              <div className="flex items-center gap-1.5">
+                <XCircle className="h-5 w-5 text-danger" />
+                <span className="text-lg font-display font-bold text-danger">Com overtime</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <CheckCircle className="h-5 w-5 text-success" />
+                <span className="text-lg font-display font-bold text-success">Sem overtime</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Team + Tasks */}
