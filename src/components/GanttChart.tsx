@@ -58,6 +58,8 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
     );
   }
 
+  const isEmergencyRowFn = (label: string) => label.includes("⚠️");
+
   const labelWidth = 148;
   const rowHeight = 42;
   const pixelsPerMinute = 1.55;
