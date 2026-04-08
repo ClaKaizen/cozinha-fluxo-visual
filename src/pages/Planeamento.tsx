@@ -68,6 +68,21 @@ export default function Planeamento() {
     return emergNames;
   };
 
+  const getDayHasOvertime = (dateStr: string): boolean => {
+    const prod = store.production.filter((p) => p.date === dateStr);
+    if (prod.length === 0) return false;
+    const ops = store.getOperatorsForDate(dateStr);
+    const sched = buildDailyGanttSchedule({
+      dateStr: normalizeDateKey(dateStr),
+      production: store.production,
+      categories: store.categories,
+      equipment: store.equipment,
+      operatorsForDate: ops,
+      tempOperators: store.tempOperators,
+    });
+    return sched.hasOvertime;
+  };
+
   const taxaColor = (rate: number) => {
     if (rate > 100) return "bg-destructive text-destructive-foreground";
     if (rate >= 80) return "bg-warning text-warning-foreground";
