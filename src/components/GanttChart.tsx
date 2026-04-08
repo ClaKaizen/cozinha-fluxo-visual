@@ -124,7 +124,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                               ...(isOverflow ? {} : {
                                 backgroundColor: colorFill(task.colorIndex, false),
                                 borderColor: colorBorder(task.colorIndex, false),
-                                borderStyle: (task as MachineTask).isEmergencyMachine ? "dashed" : "solid",
+                                borderStyle: (task as unknown as MachineTask).isEmergencyMachine ? "dashed" : "solid",
                               }),
                             }}
                             title={`${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`}
