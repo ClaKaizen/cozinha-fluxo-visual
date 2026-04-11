@@ -4,6 +4,7 @@ import {
   Equipment, Category, ProductionEntry, Operator, ScheduleEntry,
   DayAbsence, TempOperator, ShiftCode, SHIFT_HOURS, WORKING_CODES, BREAK_COEFFICIENT, INEFFICIENCY_FACTOR
 } from './types';
+import { AVAILABLE_MACHINE_MINUTES, buildDailyGanttSchedule, normalizeDateKey } from '@/components/gantt/scheduler';
 
 interface AppState {
   equipment: Equipment[];
@@ -140,42 +141,31 @@ export const useStore = create<AppState>()(
         const pessoasPresentes = presentOps.length + temps.length;
         const capacidadeDoDia = pessoasPresentes * 8;
 
-        // Taxa ocupação por equipamento — use only normal quantity
-        const equipMap = new Map<string, { totalMinutes: number }>();
-        prod.forEach((p) => {
-          const cat = state.categories.find((c) => c.id === p.categoriaId);
-          if (cat) {
-            const tHomem1 = cat.tempoCicloHomem1 ?? cat.tempoCicloHomem;
-            const tMaq1 = cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina;
-            const totalHomem = tHomem1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloHomem : 0);
-            const totalMaq = tMaq1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloMaquina : 0);
-            
-            const existing = equipMap.get(cat.equipamentoId) || { totalMinutes: 0 };
-            existing.totalMinutes += totalHomem + totalMaq;
-            equipMap.set(cat.equipamentoId, existing);
+        const daySchedule = buildDailyGanttSchedule({
+          dateStr: normalizeDateKey(date),
+          production: state.production,
+          categories: state.categories,
+          equipment: state.equipment,
+          operatorsForDate: ops,
+          tempOperators: state.tempOperators,
+        });
 
-            if (cat.equipamentos) {
-              cat.equipamentos.forEach((extra) => {
-                if (extra.simultaneo) {
-                  const extraMaq1 = extra.tempoCicloMaquina1 ?? extra.tempoCicloMaquina;
-                  const extraTotalMaq = extraMaq1 + (p.quantidade > 1 ? (p.quantidade - 1) * extra.tempoCicloMaquina : 0);
-                  const ex = equipMap.get(extra.equipamentoId) || { totalMinutes: 0 };
-                  ex.totalMinutes += extraTotalMaq;
-                  equipMap.set(extra.equipamentoId, ex);
-                }
-              });
-            }
-          }
+        const equipMap = new Map<string, { totalMinutes: number; usesEmergency: boolean }>();
+        daySchedule.machineRows.forEach((row) => {
+          row.tasks.forEach((task) => {
+            const existing = equipMap.get(task.equipmentId) || { totalMinutes: 0, usesEmergency: false };
+            existing.totalMinutes += task.segments.reduce((sum, segment) => sum + (segment.end - segment.start), 0);
+            existing.usesEmergency = existing.usesEmergency || task.isEmergencyMachine;
+            equipMap.set(task.equipmentId, existing);
+          });
         });
 
         const taxaOcupacao = state.equipment
           .map((eq) => {
             const data = equipMap.get(eq.id);
             const totalMinutes = data?.totalMinutes || 0;
-            const totalMachines = eq.quantidade + (eq.quantidadeEmergencia || 0);
-            const availableMinutes = totalMachines * 480;
-            const normalAvailable = eq.quantidade * 480;
-            const usesEmergency = totalMinutes > normalAvailable && (eq.quantidadeEmergencia || 0) > 0;
+            const availableMinutes = eq.quantidade * AVAILABLE_MACHINE_MINUTES;
+            const usesEmergency = data?.usesEmergency || false;
             const rate = availableMinutes > 0 ? (totalMinutes / availableMinutes) * 100 : 0;
             return { equipmentName: eq.nome, rate, usesEmergency };
           });
