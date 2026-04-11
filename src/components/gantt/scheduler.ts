@@ -186,18 +186,24 @@ function buildWithLunch(
     const slots = machineSlots.get(equipmentId);
     if (!slots || slots.length === 0) return { machineIdx: 0, cursor: DAY_START };
 
-    let bestIdx = 0;
-    let bestCursor = normalizeCursor(Math.max(slots[0], minStart), lunchStart, lunchEnd);
-
+    // Prefer lowest-indexed machine that hasn't reached DAY_END (fill Machine 1 before Machine 2)
     for (let j = 0; j < slots.length; j++) {
       const available = normalizeCursor(Math.max(slots[j], minStart), lunchStart, lunchEnd);
-      if (available <= bestCursor) {
-        bestIdx = j;
-        bestCursor = available;
-        break;
+      if (available < DAY_END) {
+        return { machineIdx: j, cursor: available };
       }
     }
 
+    // All machines past DAY_END — pick the one with earliest cursor for overflow
+    let bestIdx = 0;
+    let bestCursor = normalizeCursor(Math.max(slots[0], minStart), lunchStart, lunchEnd);
+    for (let j = 1; j < slots.length; j++) {
+      const available = normalizeCursor(Math.max(slots[j], minStart), lunchStart, lunchEnd);
+      if (available < bestCursor) {
+        bestIdx = j;
+        bestCursor = available;
+      }
+    }
     return { machineIdx: bestIdx, cursor: bestCursor };
   }
 
@@ -257,8 +263,27 @@ function buildWithLunch(
     }
   });
 
+  // Pre-create rows for ALL normal machines (and emergency if activated)
+  equipment.forEach((eq) => {
+    const slots = machineSlots.get(eq.id);
+    if (!slots) return;
+    for (let i = 0; i < slots.length; i++) {
+      const isEmergency = i >= eq.quantidade;
+      const label = isEmergency
+        ? `${eq.nome} ${i + 1} ⚠️`
+        : `${eq.nome} ${i + 1}`;
+      if (!machineRowsMap.has(label)) {
+        machineRowsMap.set(label, { label, tasks: [] });
+      }
+    }
+  });
+
   const machineRows = Array.from(machineRowsMap.values())
-    .filter((row) => row.tasks.length > 0)
+    .filter((row) => {
+      // Always show normal machines; only show emergency if they have tasks
+      if (row.label.includes("⚠️")) return row.tasks.length > 0;
+      return true;
+    })
     .sort((a, b) => {
       const aEmerg = a.label.includes("⚠️") ? 1 : 0;
       const bEmerg = b.label.includes("⚠️") ? 1 : 0;
