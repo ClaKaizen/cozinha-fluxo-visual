@@ -79,8 +79,11 @@ export default function Dashboard() {
   };
 
   const pessoasNecessarias = Math.ceil(stats.cargaDoDia / 8);
+  const pessoasNecessariasTeo = Math.ceil(stats.cargaTeorica / 8);
   const delta = stats.pessoasPresentes - pessoasNecessarias;
+  const deltaTeo = stats.pessoasPresentes - pessoasNecessariasTeo;
   const dimensionamentoOk = delta >= 0;
+  const dimensionamentoTeoOk = deltaTeo >= 0;
 
   // Group production by equipment
   const enrichedProd = production.map((p) => {
@@ -128,16 +131,38 @@ export default function Dashboard() {
 
       {/* KPI Cards - 6 cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4">
+        {/* Carga do Dia — dual */}
         <Card className="border-l-4 border-l-primary">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Carga do Dia</CardTitle>
             <Tooltip>
               <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[260px] text-xs">Inclui 20% ineficiência — baseado em tempo homem</TooltipContent>
+              <TooltipContent className="max-w-[280px] text-xs">Teórica: Σ T.Homem sem fator. Real: ×1.20 ineficiência</TooltipContent>
             </Tooltip>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-display font-bold">{stats.cargaDoDia.toFixed(1)}h</div>
+            <div className="grid grid-cols-2 gap-0 divide-x divide-border">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="pr-3 cursor-help">
+                    <p className="text-[10px] font-medium text-muted-foreground mb-0.5">Teórica</p>
+                    <div className="text-xl font-display font-bold text-foreground">{stats.cargaTeorica.toFixed(1)}h</div>
+                    <p className="text-[9px] text-muted-foreground">sem ineficiência</p>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[240px] text-xs">Carga calculada com base nos tempos de ciclo reais sem fator de ineficiência</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="pl-3 cursor-help">
+                    <p className="text-[10px] font-medium text-muted-foreground mb-0.5">c/ Inefic.</p>
+                    <div className="text-2xl font-display font-bold text-foreground">{stats.cargaDoDia.toFixed(1)}h</div>
+                    <p className="text-[9px] text-muted-foreground">+20% ineficiência</p>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[240px] text-xs">Carga calculada com fator de ineficiência de 20% aplicado ao tempo homem total</TooltipContent>
+              </Tooltip>
+            </div>
           </CardContent>
         </Card>
 
@@ -151,6 +176,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
+        {/* Capacidade — dual */}
         <Card className="border-l-4 border-l-primary">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Capacidade</CardTitle>
@@ -164,36 +190,83 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
+        {/* Pessoas Necessárias — dual */}
         <Card className={`border-l-4 ${dimensionamentoOk ? "border-l-success" : "border-l-danger"}`}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Pessoas Necessárias</CardTitle>
             <Tooltip>
               <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[260px] text-xs">ARREDONDAR.CIMA(Carga do Dia ÷ 8h) = {pessoasNecessarias}</TooltipContent>
+              <TooltipContent className="max-w-[280px] text-xs">Teórica: ⌈Carga teórica ÷ 8h⌉ = {pessoasNecessariasTeo}. Real: ⌈Carga real ÷ 8h⌉ = {pessoasNecessarias}</TooltipContent>
             </Tooltip>
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-display font-bold ${dimensionamentoOk ? "text-success" : "text-danger"}`}>{pessoasNecessarias}</div>
-            <p className={`text-[10px] mt-1 font-medium ${dimensionamentoOk ? "text-success" : "text-danger"}`}>
-              {delta === 0 ? "Dimensionamento correto" : delta > 0 ? `−${delta} excedente${delta > 1 ? "s" : ""}` : `+${Math.abs(delta)} em falta`}
-            </p>
+            <div className="grid grid-cols-2 gap-0 divide-x divide-border">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="pr-3 cursor-help">
+                    <p className="text-[10px] font-medium text-muted-foreground mb-0.5">Teórica</p>
+                    <div className={`text-xl font-display font-bold ${dimensionamentoTeoOk ? "text-success" : "text-danger"}`}>{pessoasNecessariasTeo}</div>
+                    <p className={`text-[9px] mt-0.5 font-medium ${dimensionamentoTeoOk ? "text-success" : "text-danger"}`}>
+                      {deltaTeo === 0 ? "Correto" : deltaTeo > 0 ? `−${deltaTeo} exc.` : `+${Math.abs(deltaTeo)} falta`}
+                    </p>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[240px] text-xs">Carga calculada com base nos tempos de ciclo reais sem fator de ineficiência</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="pl-3 cursor-help">
+                    <p className="text-[10px] font-medium text-muted-foreground mb-0.5">c/ Inefic.</p>
+                    <div className={`text-2xl font-display font-bold ${dimensionamentoOk ? "text-success" : "text-danger"}`}>{pessoasNecessarias}</div>
+                    <p className={`text-[9px] mt-0.5 font-medium ${dimensionamentoOk ? "text-success" : "text-danger"}`}>
+                      {!dimensionamentoTeoOk && !dimensionamentoOk
+                        ? `+${Math.abs(delta)} em falta`
+                        : dimensionamentoTeoOk && !dimensionamentoOk
+                        ? `+${Math.abs(delta)} em falta (por ineficiência)`
+                        : delta === 0
+                        ? "Correto"
+                        : `−${delta} exc.`}
+                    </p>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[240px] text-xs">Carga calculada com fator de ineficiência de 20% aplicado ao tempo homem total</TooltipContent>
+              </Tooltip>
+            </div>
           </CardContent>
         </Card>
 
-        {/* Taxa de Ocupação Global */}
+        {/* Taxa de Ocupação Global — dual */}
         <Card className={`border-l-4 ${stats.taxaOcupacaoGlobal > 100 ? "border-l-danger" : stats.taxaOcupacaoGlobal >= 80 ? "border-l-warning" : "border-l-success"}`}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Taxa Ocupação</CardTitle>
             <Tooltip>
               <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[260px] text-xs">Carga do Dia ÷ Capacidade do Dia × 100%</TooltipContent>
+              <TooltipContent className="max-w-[280px] text-xs">Carga ÷ Capacidade × 100%. Teórica sem fator, Real com +20%</TooltipContent>
             </Tooltip>
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-display font-bold ${occupancyColor(stats.taxaOcupacaoGlobal)}`}>
-              {stats.taxaOcupacaoGlobal.toFixed(0)}%
+            <div className="grid grid-cols-2 gap-0 divide-x divide-border">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="pr-3 cursor-help">
+                    <p className="text-[10px] font-medium text-muted-foreground mb-0.5">Teórica</p>
+                    <div className={`text-xl font-display font-bold ${occupancyColor(stats.taxaOcupacaoTeorica)}`}>{stats.taxaOcupacaoTeorica.toFixed(0)}%</div>
+                    <p className="text-[9px] text-muted-foreground">sem ineficiência</p>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[240px] text-xs">Carga calculada com base nos tempos de ciclo reais sem fator de ineficiência</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="pl-3 cursor-help">
+                    <p className="text-[10px] font-medium text-muted-foreground mb-0.5">c/ Inefic.</p>
+                    <div className={`text-2xl font-display font-bold ${occupancyColor(stats.taxaOcupacaoGlobal)}`}>{stats.taxaOcupacaoGlobal.toFixed(0)}%</div>
+                    <p className="text-[9px] text-muted-foreground">+20% ineficiência</p>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[240px] text-xs">Carga calculada com fator de ineficiência de 20% aplicado ao tempo homem total</TooltipContent>
+              </Tooltip>
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">Carga ÷ Capacidade</p>
           </CardContent>
         </Card>
 

@@ -40,11 +40,13 @@ interface AppState {
   getProductionForDate: (date: string) => ProductionEntry[];
   getOperatorsForDate: (date: string) => { operator: Operator; code: ShiftCode; absent: boolean; hours: number }[];
   getDayStats: (date: string) => {
+    cargaTeorica: number;
     cargaDoDia: number;
     pessoasPresentes: number;
     capacidadeDoDia: number;
     taxaOcupacao: { equipmentName: string; rate: number; usesEmergency: boolean }[];
     taxaOcupacaoGlobal: number;
+    taxaOcupacaoTeorica: number;
   };
   getArtigoCategory: (artigo: string) => string | undefined;
 }
@@ -135,7 +137,8 @@ export const useStore = create<AppState>()(
             cargaMinutes += tHomem1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloHomem : 0);
           }
         });
-        const cargaDoDia = (cargaMinutes / 60) * INEFFICIENCY_FACTOR;
+        const cargaTeorica = cargaMinutes / 60;
+        const cargaDoDia = cargaTeorica * INEFFICIENCY_FACTOR;
 
         const presentOps = ops.filter((o) => o.hours > 0);
         const pessoasPresentes = presentOps.length + temps.length;
@@ -171,8 +174,9 @@ export const useStore = create<AppState>()(
           });
 
         const taxaOcupacaoGlobal = capacidadeDoDia > 0 ? (cargaDoDia / capacidadeDoDia) * 100 : 0;
+        const taxaOcupacaoTeorica = capacidadeDoDia > 0 ? (cargaTeorica / capacidadeDoDia) * 100 : 0;
 
-        return { cargaDoDia, pessoasPresentes, capacidadeDoDia, taxaOcupacao, taxaOcupacaoGlobal };
+        return { cargaTeorica, cargaDoDia, pessoasPresentes, capacidadeDoDia, taxaOcupacao, taxaOcupacaoGlobal, taxaOcupacaoTeorica };
       },
 
       getArtigoCategory: (artigo) => {
