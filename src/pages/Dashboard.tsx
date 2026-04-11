@@ -202,7 +202,7 @@ export default function Dashboard() {
             <CardTitle className="text-sm font-medium text-muted-foreground">Ocupação Equip.</CardTitle>
             <Tooltip>
               <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[260px] text-xs">Σ(T.Homem + T.Máquina) ÷ ((Normal + Emerg.) × 480 min) × 100%. ⚠️ = requer equipamento de emergência</TooltipContent>
+              <TooltipContent className="max-w-[260px] text-xs">Σ(T.Máquina alocada) ÷ (Qtd. Normal × 480 min) × 100%. ⚠️ = usa máquina de emergência</TooltipContent>
             </Tooltip>
           </CardHeader>
           <CardContent>

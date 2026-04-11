@@ -10,6 +10,7 @@ import {
   type OperatorTask,
   type TimelineSegment,
 } from "@/components/gantt/scheduler";
+import OperatorTaskSequence from "@/components/gantt/OperatorTaskSequence";
 
 const EQUIPMENT_COLOR_TOKENS = [
   "--gantt-equipment-1",
@@ -34,7 +35,7 @@ function colorBorder(index: number, overflow: boolean) {
   return overflow ? `hsl(var(${token}) / 0.55)` : `hsl(var(${token}) / 0.9)`;
 }
 
-function GanttSection<TTask extends { id: string; doseLabel: string; artigo: string; start: number; end: number; colorIndex: number; segments: TimelineSegment[] }>(props: {
+function GanttSection<TTask extends { id: string; doseLabel: string; artigo: string; start: number; end: number; colorIndex: number; segments: TimelineSegment[]; showSimultaneousBadge?: boolean }>(props: {
   title: string;
   rows: GanttRow<TTask>[];
   axisEnd: number;
@@ -70,6 +71,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
   const lunchLeft = toPercent(lunchStart);
   const lunchWidth = ((lunchEnd - lunchStart) / totalSpan) * 100;
   const totalHeight = rows.length * rowHeight;
+  const showLunchBand = rows.some((row) => row.tasks.length > 0);
 
   // 16:00 hard stop line
   const hardStopLeft = toPercent(DAY_END);
@@ -91,7 +93,9 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
             </div>
             <div className="relative">
               {/* Lunch break band */}
-              <div className="absolute z-0 rounded bg-muted/60" style={{ left: labelWidth + (lunchLeft / 100) * chartWidth, width: (lunchWidth / 100) * chartWidth, top: 0, height: totalHeight }} />
+              {showLunchBand && (
+                <div className="absolute z-0 rounded bg-muted/60" style={{ left: labelWidth + (lunchLeft / 100) * chartWidth, width: (lunchWidth / 100) * chartWidth, top: 0, height: totalHeight }} />
+              )}
               {/* 16:00 hard stop line */}
               <div className="absolute z-[5]" style={{ left: labelWidth + (hardStopLeft / 100) * chartWidth, top: 0, height: totalHeight, width: 2, backgroundColor: 'hsl(var(--destructive))' }} />
               {markers.map((m) => (
@@ -137,7 +141,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                             }}
                             title={`${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`}
                           >
-                            <span className="truncate leading-tight">{isOverflow ? `⚠ ${task.artigo}` : task.artigo}</span>
+                            <span className="truncate leading-tight">{isOverflow ? `⚠ ${task.artigo}` : `${task.showSimultaneousBadge ? "⊗ " : ""}${task.artigo}`}</span>
                             {showTime && (
                               <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">
                                 {formatClock(seg.start)}–{formatClock(seg.end)}
@@ -164,11 +168,15 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               })}
               <div className="flex items-center gap-1.5">
                 <div className="h-3 w-3 rounded-sm bg-muted" />
-                <span className="text-muted-foreground">Almoço {formatClock(lunchStart)}–{formatClock(lunchEnd)}</span>
+                <span className="text-muted-foreground">Almoço (variável 12h–14h)</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="h-3 w-3 rounded-sm border border-dashed border-orange-400 bg-orange-100" />
                 <span className="text-muted-foreground">Emergência</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="flex h-3 w-3 items-center justify-center rounded-sm border border-border text-[9px] font-bold text-foreground">⊗</div>
+                <span className="text-muted-foreground">Simultâneo</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="h-3 w-3 rounded-sm border border-dashed border-red-500 bg-red-100/60" />
@@ -231,6 +239,7 @@ export default function GanttChart({ schedule }: GanttChartProps) {
         lunchStart={schedule.lunchStart}
         lunchEnd={schedule.lunchEnd}
       />
+      <OperatorTaskSequence schedule={schedule} />
 
       {/* Unscheduled tasks warning */}
       {schedule.unscheduledTasks.length > 0 && (
