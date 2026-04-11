@@ -330,6 +330,7 @@ function buildWithLunch(
           segments: scheduled.segments,
           isEmergencyMachine,
           showSimultaneousBadge: Boolean(booking.showSimultaneousBadge),
+          isSequentialPhase: Boolean(booking.isSequentialPhase),
         };
 
         taskMachineTasks.push(machineTask);
