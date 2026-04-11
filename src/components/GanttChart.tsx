@@ -141,7 +141,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                             }}
                             title={`${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`}
                           >
-                            <span className="truncate leading-tight">{isOverflow ? `⚠ ${task.artigo}` : `${task.showSimultaneousBadge ? "⊗ " : ""}${task.artigo}`}</span>
+                            <span className="truncate leading-tight">{isOverflow ? `⚠ ${task.artigo}` : `${(task as unknown as MachineTask).isSequentialPhase ? "→ " : task.showSimultaneousBadge ? "⊗ " : ""}${task.artigo}`}</span>
                             {showTime && (
                               <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">
                                 {formatClock(seg.start)}–{formatClock(seg.end)}
