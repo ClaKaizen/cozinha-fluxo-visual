@@ -25,6 +25,7 @@ export interface MachineBooking {
   simultaneous: boolean;
   colorIndex: number;
   showSimultaneousBadge?: boolean;
+  isSequentialPhase?: boolean;
 }
 
 export interface PlanningTask {
@@ -49,6 +50,7 @@ export interface MachineTask extends PlanningTask {
   segments: TimelineSegment[];
   isEmergencyMachine: boolean;
   showSimultaneousBadge: boolean;
+  isSequentialPhase: boolean;
 }
 
 export interface OperatorTask extends PlanningTask {
