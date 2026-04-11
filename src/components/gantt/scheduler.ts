@@ -25,6 +25,7 @@ export interface MachineBooking {
   simultaneous: boolean;
   colorIndex: number;
   showSimultaneousBadge?: boolean;
+  isSequentialPhase?: boolean;
 }
 
 export interface PlanningTask {
@@ -49,6 +50,7 @@ export interface MachineTask extends PlanningTask {
   segments: TimelineSegment[];
   isEmergencyMachine: boolean;
   showSimultaneousBadge: boolean;
+  isSequentialPhase: boolean;
 }
 
 export interface OperatorTask extends PlanningTask {
@@ -328,6 +330,7 @@ function buildWithLunch(
           segments: scheduled.segments,
           isEmergencyMachine,
           showSimultaneousBadge: Boolean(booking.showSimultaneousBadge),
+          isSequentialPhase: Boolean(booking.isSequentialPhase),
         };
 
         taskMachineTasks.push(machineTask);
@@ -532,6 +535,7 @@ export function buildDailyGanttSchedule({
               duration: extraDuration,
               simultaneous: extra.simultaneo,
               colorIndex: extra.simultaneo ? primaryColorIndex : (equipmentIndex.get(extraEq.id) ?? 0) % 6,
+              isSequentialPhase: !extra.simultaneo,
             });
           }
         }
@@ -587,23 +591,31 @@ export function buildDailyGanttSchedule({
   const tempOpsForDate = tempOperators.filter((t) => t.date === selectedDate);
   const allOpNames = [...operatorNames, ...tempOpsForDate.map((t) => t.nome)];
 
-  // Try both lunch positions: 12:00-13:00 and 13:00-14:00
-  const LUNCH_A_START = 12 * 60; // 720
-  const LUNCH_A_END = 13 * 60;   // 780
-  const LUNCH_B_START = 13 * 60; // 780
-  const LUNCH_B_END = 14 * 60;   // 840
+  // Try 4 lunch positions: 12:00, 12:30, 13:00, 13:30 start
+  const lunchOptions: [number, number][] = [
+    [12 * 60, 13 * 60],       // 12:00–13:00
+    [12 * 60 + 30, 13 * 60 + 30], // 12:30–13:30
+    [13 * 60, 14 * 60],       // 13:00–14:00
+    [13 * 60 + 30, 14 * 60 + 30], // 13:30–14:30 (edge: ends at 14:30 which is still valid within window)
+  ];
 
-  const resultA = buildWithLunch(tasks, equipment, equipmentMap, allOpNames, LUNCH_A_START, LUNCH_A_END);
-  const resultB = buildWithLunch(tasks, equipment, equipmentMap, allOpNames, LUNCH_B_START, LUNCH_B_END);
+  let bestResult: Omit<DailyGanttSchedule, 'tasks' | 'lunchStart' | 'lunchEnd'> | null = null;
+  let bestScore = Infinity;
+  let bestLunch: [number, number] = [13 * 60, 14 * 60];
 
-  // Pick the one with fewer overflows/unscheduled
-  const scoreA = resultA.overflowTasks.length + resultA.unscheduledTasks.reduce((s, u) => s + u.dosesRemaining, 0);
-  const scoreB = resultB.overflowTasks.length + resultB.unscheduledTasks.reduce((s, u) => s + u.dosesRemaining, 0);
+  for (const [ls, le] of lunchOptions) {
+    const result = buildWithLunch(tasks, equipment, equipmentMap, allOpNames, ls, le);
+    const score = result.overflowTasks.length + result.unscheduledTasks.reduce((s, u) => s + u.dosesRemaining, 0);
+    if (score < bestScore) {
+      bestScore = score;
+      bestResult = result;
+      bestLunch = [ls, le];
+    }
+  }
 
-  const bestIsA = scoreA < scoreB;
-  const best = bestIsA ? resultA : (scoreB < scoreA ? resultB : resultB); // default to 13:00 if tied
-  const chosenLunchStart = bestIsA ? LUNCH_A_START : LUNCH_B_START;
-  const chosenLunchEnd = bestIsA ? LUNCH_A_END : LUNCH_B_END;
+  const best = bestResult!;
+  const chosenLunchStart = bestLunch[0];
+  const chosenLunchEnd = bestLunch[1];
 
   void tempOperators;
 

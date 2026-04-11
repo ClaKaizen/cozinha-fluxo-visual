@@ -141,7 +141,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                             }}
                             title={`${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`}
                           >
-                            <span className="truncate leading-tight">{isOverflow ? `⚠ ${task.artigo}` : `${task.showSimultaneousBadge ? "⊗ " : ""}${task.artigo}`}</span>
+                            <span className="truncate leading-tight">{isOverflow ? `⚠ ${task.artigo}` : `${(task as unknown as MachineTask).isSequentialPhase ? "→ " : task.showSimultaneousBadge ? "⊗ " : ""}${task.artigo}`}</span>
                             {showTime && (
                               <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">
                                 {formatClock(seg.start)}–{formatClock(seg.end)}
@@ -177,6 +177,10 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               <div className="flex items-center gap-1.5">
                 <div className="flex h-3 w-3 items-center justify-center rounded-sm border border-border text-[9px] font-bold text-foreground">⊗</div>
                 <span className="text-muted-foreground">Simultâneo</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="flex h-3 w-3 items-center justify-center rounded-sm border border-border text-[9px] font-bold text-foreground">→</div>
+                <span className="text-muted-foreground">Sequencial (prep)</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="h-3 w-3 rounded-sm border border-dashed border-red-500 bg-red-100/60" />
