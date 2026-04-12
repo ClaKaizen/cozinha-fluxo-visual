@@ -99,8 +99,10 @@ export default function Dashboard() {
     equipGroups.get(key)!.push(p);
   });
 
+  const [showOverflowDetails, setShowOverflowDetails] = useState(false);
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       {/* Date navigation */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-display font-bold text-foreground">Dashboard</h1>
@@ -113,133 +115,154 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Emergency warning */}
+      {/* Alert banners — compact */}
       {schedule.usesEmergencyEquipment && (
-        <div className="flex items-center gap-2 rounded-lg border border-warning/50 bg-warning/10 px-4 py-3 text-sm font-medium text-warning">
-          <AlertTriangle className="h-5 w-5" />
-          <span>⚠️ Equipamentos de emergência em uso: {schedule.emergencyEquipmentNames.join(", ")}</span>
+        <div className="flex items-center gap-2 rounded-md border-l-4 border-l-warning bg-card px-3 py-2 text-sm text-warning shadow-sm">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>Equipamentos de emergência em uso: {schedule.emergencyEquipmentNames.join(", ")}</span>
         </div>
       )}
 
-      {/* Overflow warning */}
       {schedule.overflowTasks && schedule.overflowTasks.length > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive">
-          <AlertTriangle className="h-5 w-5" />
-          <span>⚠️ Tarefas em overflow (após 16:00): {schedule.overflowTasks.join(", ")}</span>
+        <div className="rounded-md border-l-4 border-l-destructive bg-card px-3 py-2 shadow-sm">
+          <div className="flex items-center gap-2 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span className="flex-1">
+              {schedule.overflowTasks.length} tarefa(s) em overflow
+              {schedule.overflowTasks.length <= 3 && `: ${schedule.overflowTasks.join(", ")}`}
+            </span>
+            {schedule.overflowTasks.length > 3 && (
+              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-destructive"
+                onClick={() => setShowOverflowDetails(!showOverflowDetails)}>
+                {showOverflowDetails ? "ocultar" : "ver detalhes"}
+              </Button>
+            )}
+          </div>
+          {showOverflowDetails && schedule.overflowTasks.length > 3 && (
+            <p className="text-xs text-destructive/80 mt-1 pl-6">{schedule.overflowTasks.join(", ")}</p>
+          )}
         </div>
       )}
 
-      {/* KPI Cards - 6 cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4">
-        {/* Carga do Dia — stacked */}
-        <Card className="border-l-4 border-l-primary">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Carga do Dia</CardTitle>
-            <Tooltip>
-              <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[280px] text-xs">Real: Σ T.Homem sem fator. Com ineficiência: ×1.20</TooltipContent>
-            </Tooltip>
-          </CardHeader>
-          <CardContent className="space-y-2 pt-0">
-            <div className="rounded-md bg-blue-100 p-3 text-center">
-              <div className="text-2xl font-display font-bold text-foreground">{stats.cargaTeorica.toFixed(1)} h</div>
-              <p className="text-xs text-muted-foreground mt-1">Real</p>
+      {/* KPI Strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-7 gap-3">
+        {/* Carga do Dia — dual */}
+        <Card className="border-l-4 border-l-primary shadow-sm lg:col-span-1">
+          <div className="p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-muted-foreground">Carga do Dia</span>
+              <Tooltip>
+                <TooltipTrigger><Info className="h-3.5 w-3.5 text-muted-foreground" /></TooltipTrigger>
+                <TooltipContent className="max-w-[280px] text-xs">Real: Σ T.Homem sem fator. Com ineficiência: ×1.20</TooltipContent>
+              </Tooltip>
             </div>
-            <div className="rounded-md bg-yellow-100 p-3 text-center">
-              <div className="text-2xl font-display font-bold text-foreground">{stats.cargaDoDia.toFixed(1)} h</div>
-              <p className="text-xs text-muted-foreground mt-1">Com 20% de <span className="underline">ineficiência</span></p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-md bg-blue-50 px-2 py-2 text-center">
+                <div className="text-2xl font-display font-bold text-blue-700 whitespace-nowrap">{stats.cargaTeorica.toFixed(1)}h</div>
+                <p className="text-[10px] text-blue-400 mt-0.5">Real</p>
+              </div>
+              <div className="rounded-md bg-yellow-50 px-2 py-2 text-center">
+                <div className="text-2xl font-display font-bold text-foreground whitespace-nowrap">{stats.cargaDoDia.toFixed(1)}h</div>
+                <p className="text-[10px] text-yellow-600 mt-0.5">c/ Inefic.</p>
+              </div>
             </div>
-          </CardContent>
+          </div>
         </Card>
 
-        <Card className="border-l-4 border-l-secondary">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Pessoas Presentes</CardTitle>
-            <Users className="h-5 w-5 text-secondary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-display font-bold">{stats.pessoasPresentes}</div>
-          </CardContent>
+        {/* Pessoas Presentes — single */}
+        <Card className="border-l-4 border-l-secondary shadow-sm">
+          <div className="p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-muted-foreground">Pessoas Presentes</span>
+              <Users className="h-3.5 w-3.5 text-secondary" />
+            </div>
+            <div className="text-3xl font-display font-bold">{stats.pessoasPresentes}</div>
+          </div>
         </Card>
 
-        {/* Capacidade */}
-        <Card className="border-l-4 border-l-primary">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Capacidade</CardTitle>
-            <Tooltip>
-              <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[260px] text-xs">{stats.pessoasPresentes} × 8h = {stats.capacidadeDoDia.toFixed(1)}h</TooltipContent>
-            </Tooltip>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-display font-bold">{stats.capacidadeDoDia.toFixed(1)}h</div>
-          </CardContent>
+        {/* Capacidade — single */}
+        <Card className="border-l-4 border-l-primary shadow-sm">
+          <div className="p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-muted-foreground">Capacidade</span>
+              <Tooltip>
+                <TooltipTrigger><Info className="h-3.5 w-3.5 text-muted-foreground" /></TooltipTrigger>
+                <TooltipContent className="max-w-[260px] text-xs">{stats.pessoasPresentes} × 8h = {stats.capacidadeDoDia.toFixed(1)}h</TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="text-3xl font-display font-bold">{stats.capacidadeDoDia.toFixed(1)}h</div>
+          </div>
         </Card>
 
-        {/* Pessoas Necessárias — stacked */}
-        <Card className={`border-l-4 ${dimensionamentoOk ? "border-l-success" : "border-l-danger"}`}>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Pessoas Necessárias</CardTitle>
-            <Tooltip>
-              <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[280px] text-xs">Real: ⌈Carga teórica ÷ 8h⌉ = {pessoasNecessariasTeo}. Com ineficiência: ⌈Carga real ÷ 8h⌉ = {pessoasNecessarias}</TooltipContent>
-            </Tooltip>
-          </CardHeader>
-          <CardContent className="space-y-2 pt-0">
-            <div className="rounded-md bg-blue-100 p-3 text-center">
-              <div className={`text-2xl font-display font-bold ${dimensionamentoTeoOk ? "text-success" : "text-danger"}`}>{pessoasNecessariasTeo}</div>
-              <p className="text-xs text-muted-foreground mt-1">Real</p>
-              <p className={`text-[10px] font-medium mt-0.5 ${dimensionamentoTeoOk ? "text-success" : "text-danger"}`}>
-                {deltaTeo === 0 ? "Correto" : deltaTeo > 0 ? `−${deltaTeo} exc.` : `+${Math.abs(deltaTeo)} em falta`}
-              </p>
+        {/* Pessoas Necessárias — dual */}
+        <Card className={`border-l-4 shadow-sm ${dimensionamentoOk ? "border-l-success" : "border-l-danger"}`}>
+          <div className="p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-muted-foreground">Pessoas Necessárias</span>
+              <Tooltip>
+                <TooltipTrigger><Info className="h-3.5 w-3.5 text-muted-foreground" /></TooltipTrigger>
+                <TooltipContent className="max-w-[280px] text-xs">Real: ⌈Carga teórica ÷ 8h⌉ = {pessoasNecessariasTeo}. Com ineficiência: ⌈Carga real ÷ 8h⌉ = {pessoasNecessarias}</TooltipContent>
+              </Tooltip>
             </div>
-            <div className="rounded-md bg-yellow-100 p-3 text-center">
-              <div className={`text-2xl font-display font-bold ${dimensionamentoOk ? "text-success" : "text-danger"}`}>{pessoasNecessarias}</div>
-              <p className="text-xs text-muted-foreground mt-1">Com 20% de <span className="underline">ineficiência</span></p>
-              <p className={`text-[10px] font-medium mt-0.5 ${dimensionamentoOk ? "text-success" : "text-danger"}`}>
-                {!dimensionamentoTeoOk && !dimensionamentoOk
-                  ? `+${Math.abs(delta)} em falta`
-                  : dimensionamentoTeoOk && !dimensionamentoOk
-                  ? `+${Math.abs(delta)} em falta (por ineficiência)`
-                  : delta === 0
-                  ? "Correto"
-                  : `−${delta} exc.`}
-              </p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-md bg-blue-50 px-2 py-2 text-center">
+                <div className={`text-2xl font-display font-bold whitespace-nowrap ${dimensionamentoTeoOk ? "text-success" : "text-danger"}`}>{pessoasNecessariasTeo}</div>
+                <p className="text-[10px] text-blue-400 mt-0.5">Real</p>
+                <p className={`text-[9px] font-medium ${dimensionamentoTeoOk ? "text-success" : "text-danger"}`}>
+                  {deltaTeo === 0 ? "Correto" : deltaTeo > 0 ? `−${deltaTeo} exc.` : `+${Math.abs(deltaTeo)} em falta`}
+                </p>
+              </div>
+              <div className="rounded-md bg-yellow-50 px-2 py-2 text-center">
+                <div className={`text-2xl font-display font-bold whitespace-nowrap ${dimensionamentoOk ? "text-success" : "text-danger"}`}>{pessoasNecessarias}</div>
+                <p className="text-[10px] text-yellow-600 mt-0.5">c/ Inefic.</p>
+                <p className={`text-[9px] font-medium ${dimensionamentoOk ? "text-success" : "text-danger"}`}>
+                  {!dimensionamentoTeoOk && !dimensionamentoOk
+                    ? `+${Math.abs(delta)} em falta`
+                    : dimensionamentoTeoOk && !dimensionamentoOk
+                    ? `+${Math.abs(delta)} em falta (inefic.)`
+                    : delta === 0
+                    ? "Correto"
+                    : `−${delta} exc.`}
+                </p>
+              </div>
             </div>
-          </CardContent>
+          </div>
         </Card>
 
-        {/* Taxa de Ocupação — stacked */}
-        <Card className={`border-l-4 ${stats.taxaOcupacaoGlobal > 100 ? "border-l-danger" : stats.taxaOcupacaoGlobal >= 80 ? "border-l-warning" : "border-l-success"}`}>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Taxa Ocupação</CardTitle>
-            <Tooltip>
-              <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[280px] text-xs">Carga ÷ Capacidade × 100%. Real sem fator, Com ineficiência +20%</TooltipContent>
-            </Tooltip>
-          </CardHeader>
-          <CardContent className="space-y-2 pt-0">
-            <div className="rounded-md bg-blue-100 p-3 text-center">
-              <div className={`text-2xl font-display font-bold ${occupancyColor(stats.taxaOcupacaoTeorica)}`}>{stats.taxaOcupacaoTeorica.toFixed(0)}%</div>
-              <p className="text-xs text-muted-foreground mt-1">Real</p>
+        {/* Taxa Ocupação — dual */}
+        <Card className={`border-l-4 shadow-sm ${stats.taxaOcupacaoGlobal > 100 ? "border-l-danger" : stats.taxaOcupacaoGlobal >= 80 ? "border-l-warning" : "border-l-success"}`}>
+          <div className="p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-muted-foreground">Taxa Ocupação</span>
+              <Tooltip>
+                <TooltipTrigger><Info className="h-3.5 w-3.5 text-muted-foreground" /></TooltipTrigger>
+                <TooltipContent className="max-w-[280px] text-xs">Carga ÷ Capacidade × 100%. Real sem fator, Com ineficiência +20%</TooltipContent>
+              </Tooltip>
             </div>
-            <div className="rounded-md bg-yellow-100 p-3 text-center">
-              <div className={`text-2xl font-display font-bold ${occupancyColor(stats.taxaOcupacaoGlobal)}`}>{stats.taxaOcupacaoGlobal.toFixed(0)}%</div>
-              <p className="text-xs text-muted-foreground mt-1">Com 20% de <span className="underline">ineficiência</span></p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-md bg-blue-50 px-2 py-2 text-center">
+                <div className={`text-2xl font-display font-bold whitespace-nowrap ${occupancyColor(stats.taxaOcupacaoTeorica)}`}>{stats.taxaOcupacaoTeorica.toFixed(0)}%</div>
+                <p className="text-[10px] text-blue-400 mt-0.5">Real</p>
+              </div>
+              <div className="rounded-md bg-yellow-50 px-2 py-2 text-center">
+                <div className={`text-2xl font-display font-bold whitespace-nowrap ${occupancyColor(stats.taxaOcupacaoGlobal)}`}>{stats.taxaOcupacaoGlobal.toFixed(0)}%</div>
+                <p className="text-[10px] text-yellow-600 mt-0.5">c/ Inefic.</p>
+              </div>
             </div>
-          </CardContent>
+          </div>
         </Card>
 
-        <Card className="border-l-4 border-l-secondary">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Ocupação Equip.</CardTitle>
-            <Tooltip>
-              <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[260px] text-xs">Σ(T.Máquina alocada) ÷ (Qtd. Normal × 480 min) × 100%. ⚠️ = usa máquina de emergência</TooltipContent>
-            </Tooltip>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-1">
+        {/* Ocupação Equip. — single */}
+        <Card className="border-l-4 border-l-secondary shadow-sm">
+          <div className="p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-muted-foreground">Ocupação Equip.</span>
+              <Tooltip>
+                <TooltipTrigger><Info className="h-3.5 w-3.5 text-muted-foreground" /></TooltipTrigger>
+                <TooltipContent className="max-w-[260px] text-xs">Σ(T.Máquina alocada) ÷ (Qtd. Normal × 480 min) × 100%</TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="space-y-0.5">
               {stats.taxaOcupacao.map((eq) => (
                 <div key={eq.equipmentName} className={`flex items-center justify-between text-xs px-1.5 py-0.5 rounded ${occupancyBg(eq.rate)}`}>
                   <span className="font-medium truncate">{eq.equipmentName}</span>
@@ -250,41 +273,41 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
-          </CardContent>
+          </div>
         </Card>
 
-        {/* Overtime KPI */}
-        <Card className={`border-l-4 ${schedule.hasOvertime ? "border-l-danger" : "border-l-success"}`}>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Overtime</CardTitle>
-            <Tooltip>
-              <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
-              <TooltipContent className="max-w-[260px] text-xs">Existem tarefas não concluídas antes das 16h ou operadores com carga &gt; 100%</TooltipContent>
-            </Tooltip>
-          </CardHeader>
-          <CardContent>
+        {/* Overtime — single */}
+        <Card className={`border-l-4 shadow-sm ${schedule.hasOvertime ? "border-l-danger" : "border-l-success"}`}>
+          <div className="p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-muted-foreground">Overtime</span>
+              <Tooltip>
+                <TooltipTrigger><Info className="h-3.5 w-3.5 text-muted-foreground" /></TooltipTrigger>
+                <TooltipContent className="max-w-[260px] text-xs">Existem tarefas não concluídas antes das 16h ou operadores com carga &gt; 100%</TooltipContent>
+              </Tooltip>
+            </div>
             {schedule.hasOvertime ? (
               <div className="flex items-center gap-1.5">
                 <XCircle className="h-5 w-5 text-danger" />
-                <span className="text-lg font-display font-bold text-danger">Com overtime</span>
+                <span className="text-base font-display font-bold text-danger">Com overtime</span>
               </div>
             ) : (
               <div className="flex items-center gap-1.5">
                 <CheckCircle className="h-5 w-5 text-success" />
-                <span className="text-lg font-display font-bold text-success">Sem overtime</span>
+                <span className="text-base font-display font-bold text-success">Sem overtime</span>
               </div>
             )}
-          </CardContent>
+          </div>
         </Card>
       </div>
 
       {/* Team + Tasks */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-1">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-display">Equipa do Dia</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1.5">
+        <Card className="lg:col-span-1 shadow-sm">
+          <div className="rounded-t-lg bg-[#44546A] px-4 py-2">
+            <h2 className="text-sm font-display font-semibold text-white">Equipa do Dia</h2>
+          </div>
+          <CardContent className="p-4 space-y-1.5">
             {operators.map((o) => {
               const isWorking = WORKING_CODES.includes(o.code) && !o.absent;
               const opHours = operatorHoursMap.get(o.operator.nome) ?? 0;
@@ -344,11 +367,11 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-display">Tarefas do Dia</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Card className="lg:col-span-2 shadow-sm">
+          <div className="rounded-t-lg bg-[#44546A] px-4 py-2">
+            <h2 className="text-sm font-display font-semibold text-white">Tarefas do Dia</h2>
+          </div>
+          <CardContent className="p-4">
             {production.length === 0 ? (
               <p className="text-muted-foreground text-sm py-8 text-center">Sem tarefas para este dia.</p>
             ) : (
@@ -369,7 +392,7 @@ export default function Dashboard() {
                       </thead>
                       <tbody>
                         {items.map((p, idx) => (
-                          <tr key={p.id} className={`border-b last:border-b-0 ${idx % 2 === 1 ? "bg-muted/30" : ""}`}>
+                          <tr key={p.id} className={`border-b last:border-b-0 ${idx % 2 === 0 ? "bg-gray-50" : ""}`}>
                             <td className="px-2 py-1 font-medium">{p.artigo}</td>
                             <td className="px-2 py-1 text-right">{p.quantidade}</td>
                             <td className="px-2 py-1">{p.unidade || "-"}</td>
