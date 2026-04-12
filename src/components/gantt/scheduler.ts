@@ -91,6 +91,7 @@ export interface DailyGanttSchedule {
   lunchEnd: number;
   hasOvertime: boolean;
   operatorLunchBreaks: Record<string, OperatorLunchBreak>;
+  machineLunchBreaks: Record<string, OperatorLunchBreak>;
 }
 
 export interface OperatorPresence {
