@@ -713,7 +713,7 @@ export function buildDailyGanttSchedule({
       tasks: [], machineRows: [], operatorRows: [], axisEnd: DAY_END,
       usesEmergencyEquipment: false, emergencyEquipmentNames: [], overflowTasks: [],
       unscheduledTasks: [], lunchStart: 13 * 60, lunchEnd: 14 * 60, hasOvertime: false,
-      operatorLunchBreaks: {},
+      operatorLunchBreaks: {}, machineLunchBreaks: {},
     };
   }
 
