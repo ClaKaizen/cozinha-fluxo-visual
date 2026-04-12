@@ -488,39 +488,75 @@ function buildWithLunch(
     });
 
     // PASS 2: Calculate per-operator lunch and re-schedule with individual lunch breaks
+    // Hard constraint: lunch must START by 13:00 at the latest, END by 14:00
+    const LUNCH_LATEST_START = 13 * 60; // 13:00
+    const LUNCH_LATEST_END = 14 * 60;   // 14:00
+
     for (const [name, assignments] of assignmentsByOperator) {
       if (assignments.length === 0) continue;
 
       assignments.sort((a, b) => a.machineStart - b.machineStart);
 
-      // Pass 2A: Simulate schedule WITHOUT lunch to find natural task positions
+      // Pass 2A: Find the latest pre-lunch task end, capped at 13:00
       let tempCursor = DAY_START;
       let opLunchStart = targetLunchStart;
+      const preLunchAssignments: OperatorAssignment[] = [];
+      const postLunchAssignments: OperatorAssignment[] = [];
 
       for (const a of assignments) {
-        tempCursor = Math.max(tempCursor, a.machineStart);
-        const tempEnd = tempCursor + a.task.operatorDuration;
+        const taskStart = Math.max(tempCursor, a.machineStart);
+        const taskEnd = taskStart + a.task.operatorDuration;
 
-        // Does this task naturally overlap with the target lunch window?
-        if (a.machineStart < targetLunchStart + 30 && tempEnd > targetLunchStart) {
-          if (tempEnd <= targetLunchStart + 45) {
-            opLunchStart = Math.max(opLunchStart, tempEnd);
-          } else {
-            // Flag case: heavy workload, but still shift lunch
-            opLunchStart = Math.max(opLunchStart, tempEnd);
+        // Would this task push lunch past 13:00?
+        if (taskEnd > LUNCH_LATEST_START && taskStart < LUNCH_LATEST_START) {
+          // Task overlaps 13:00 — don't schedule before lunch, push to after
+          postLunchAssignments.push(a);
+        } else if (taskStart >= LUNCH_LATEST_START) {
+          // Task starts at or after 13:00 — goes after lunch
+          postLunchAssignments.push(a);
+        } else {
+          // Task ends by 13:00 — fine before lunch
+          preLunchAssignments.push(a);
+          if (taskEnd > opLunchStart) {
+            opLunchStart = taskEnd;
           }
+          tempCursor = taskEnd;
         }
-        tempCursor = tempEnd;
       }
 
+      // Cap lunch start at 13:00
+      opLunchStart = Math.min(opLunchStart, LUNCH_LATEST_START);
+      // Ensure lunch start is at least the target
+      opLunchStart = Math.max(opLunchStart, targetLunchStart);
       const opLunchEnd = opLunchStart + 60;
       operatorLunchBreaks[name] = { start: opLunchStart, end: opLunchEnd };
 
       // Pass 2B: Re-schedule all tasks with the individual lunch break
       let cursor = DAY_START;
-      for (const a of assignments) {
+      // Pre-lunch tasks
+      for (const a of preLunchAssignments) {
         cursor = Math.max(cursor, a.machineStart);
         cursor = normalizeCursor(cursor, opLunchStart, opLunchEnd);
+        const scheduled = createSegments(cursor, a.task.operatorDuration, opLunchStart, opLunchEnd);
+
+        const ot: OperatorTask = {
+          ...a.task,
+          operatorName: name,
+          start: scheduled.start,
+          end: scheduled.end,
+          segments: scheduled.segments,
+          machineTaskId: a.machineTaskId,
+          machineLabel: a.machineLabel,
+          showSimultaneousBadge: a.showSimultaneousBadge,
+        };
+        operatorRowsMap.get(name)?.tasks.push(ot);
+        cursor = scheduled.end;
+      }
+
+      // After lunch tasks — start no earlier than lunch end
+      cursor = Math.max(cursor, opLunchEnd);
+      for (const a of postLunchAssignments) {
+        cursor = Math.max(cursor, opLunchEnd, a.machineStart);
         const scheduled = createSegments(cursor, a.task.operatorDuration, opLunchStart, opLunchEnd);
 
         const ot: OperatorTask = {
@@ -669,12 +705,11 @@ export function buildDailyGanttSchedule({
   const tempOpsForDate = tempOperators.filter((t) => t.date === selectedDate);
   const allOpNames = [...operatorNames, ...tempOpsForDate.map((t) => t.nome)];
 
-  // Try 4 lunch target positions: 12:00, 12:30, 13:00, 13:30 start
+  // Try 3 lunch target positions: 12:00, 12:30, 13:00 start (must end by 14:00)
   const lunchOptions: [number, number][] = [
     [12 * 60, 13 * 60],
     [12 * 60 + 30, 13 * 60 + 30],
     [13 * 60, 14 * 60],
-    [13 * 60 + 30, 14 * 60 + 30],
   ];
 
   let bestResult: Omit<DailyGanttSchedule, 'tasks' | 'lunchStart' | 'lunchEnd'> | null = null;
