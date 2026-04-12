@@ -145,48 +145,45 @@ export default function Dashboard() {
       )}
 
       {/* KPI Strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-7 gap-2">
         {/* Carga do Dia — dual */}
-        <Card className="border-l-4 border-l-primary shadow-sm lg:col-span-1">
-          <div className="p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-muted-foreground">Carga do Dia</span>
+        <Card className="border-l-4 border-l-primary shadow-sm min-w-0 overflow-hidden">
+          <div className="px-2.5 py-2">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-medium text-muted-foreground">Carga do Dia</span>
               <Tooltip>
-                <TooltipTrigger><Info className="h-3.5 w-3.5 text-muted-foreground" /></TooltipTrigger>
+                <TooltipTrigger><Info className="h-3 w-3 text-muted-foreground" /></TooltipTrigger>
                 <TooltipContent className="max-w-[280px] text-xs">Real: Σ T.Homem sem fator. Com ineficiência: ×1.20</TooltipContent>
               </Tooltip>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-md bg-blue-50 px-2 py-2 text-center">
-                <div className="text-2xl font-display font-bold text-blue-700 whitespace-nowrap">{stats.cargaTeorica.toFixed(1)}h</div>
-                <p className="text-[10px] text-blue-400 mt-0.5">Real</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              <div className="rounded bg-blue-50 px-1.5 py-1.5 text-center">
+                <div className="text-xl font-display font-bold text-blue-700 whitespace-nowrap">{stats.cargaTeorica.toFixed(1)}h</div>
+                <p className="text-[9px] text-blue-400 mt-0.5">Real</p>
               </div>
-              <div className="rounded-md bg-yellow-50 px-2 py-2 text-center">
-                <div className="text-2xl font-display font-bold text-foreground whitespace-nowrap">{stats.cargaDoDia.toFixed(1)}h</div>
-                <p className="text-[10px] text-yellow-600 mt-0.5">c/ Inefic.</p>
+              <div className="rounded bg-yellow-50 px-1.5 py-1.5 text-center">
+                <div className="text-xl font-display font-bold text-foreground whitespace-nowrap">{stats.cargaDoDia.toFixed(1)}h</div>
+                <p className="text-[9px] text-yellow-600 mt-0.5">c/ Inefic.</p>
               </div>
             </div>
           </div>
         </Card>
 
         {/* Pessoas Presentes — single */}
-        <Card className="border-l-4 border-l-secondary shadow-sm">
-          <div className="p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-muted-foreground">Pessoas Presentes</span>
-              <Users className="h-3.5 w-3.5 text-secondary" />
-            </div>
+        <Card className="border-l-4 border-l-secondary shadow-sm min-w-0">
+          <div className="px-2.5 py-2 flex flex-col items-center justify-center h-full">
+            <span className="text-[11px] font-medium text-muted-foreground mb-1">Pessoas Presentes</span>
             <div className="text-3xl font-display font-bold">{stats.pessoasPresentes}</div>
           </div>
         </Card>
 
         {/* Capacidade — single */}
-        <Card className="border-l-4 border-l-primary shadow-sm">
-          <div className="p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-muted-foreground">Capacidade</span>
+        <Card className="border-l-4 border-l-primary shadow-sm min-w-0">
+          <div className="px-2.5 py-2 flex flex-col items-center justify-center h-full">
+            <div className="flex items-center gap-1 mb-1">
+              <span className="text-[11px] font-medium text-muted-foreground">Capacidade</span>
               <Tooltip>
-                <TooltipTrigger><Info className="h-3.5 w-3.5 text-muted-foreground" /></TooltipTrigger>
+                <TooltipTrigger><Info className="h-3 w-3 text-muted-foreground" /></TooltipTrigger>
                 <TooltipContent className="max-w-[260px] text-xs">{stats.pessoasPresentes} × 8h = {stats.capacidadeDoDia.toFixed(1)}h</TooltipContent>
               </Tooltip>
             </div>
@@ -195,31 +192,31 @@ export default function Dashboard() {
         </Card>
 
         {/* Pessoas Necessárias — dual */}
-        <Card className={`border-l-4 shadow-sm ${dimensionamentoOk ? "border-l-success" : "border-l-danger"}`}>
-          <div className="p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-muted-foreground">Pessoas Necessárias</span>
+        <Card className={`border-l-4 shadow-sm min-w-0 overflow-hidden ${dimensionamentoOk ? "border-l-success" : "border-l-danger"}`}>
+          <div className="px-2.5 py-2">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-medium text-muted-foreground">Pessoas Nec.</span>
               <Tooltip>
-                <TooltipTrigger><Info className="h-3.5 w-3.5 text-muted-foreground" /></TooltipTrigger>
+                <TooltipTrigger><Info className="h-3 w-3 text-muted-foreground" /></TooltipTrigger>
                 <TooltipContent className="max-w-[280px] text-xs">Real: ⌈Carga teórica ÷ 8h⌉ = {pessoasNecessariasTeo}. Com ineficiência: ⌈Carga real ÷ 8h⌉ = {pessoasNecessarias}</TooltipContent>
               </Tooltip>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-md bg-blue-50 px-2 py-2 text-center">
-                <div className={`text-2xl font-display font-bold whitespace-nowrap ${dimensionamentoTeoOk ? "text-success" : "text-danger"}`}>{pessoasNecessariasTeo}</div>
-                <p className="text-[10px] text-blue-400 mt-0.5">Real</p>
-                <p className={`text-[9px] font-medium ${dimensionamentoTeoOk ? "text-success" : "text-danger"}`}>
+            <div className="grid grid-cols-2 gap-1.5">
+              <div className="rounded bg-blue-50 px-1.5 py-1.5 text-center">
+                <div className={`text-xl font-display font-bold whitespace-nowrap ${dimensionamentoTeoOk ? "text-success" : "text-danger"}`}>{pessoasNecessariasTeo}</div>
+                <p className="text-[9px] text-blue-400 mt-0.5">Real</p>
+                <p className={`text-[8px] font-medium leading-tight ${dimensionamentoTeoOk ? "text-success" : "text-danger"}`}>
                   {deltaTeo === 0 ? "Correto" : deltaTeo > 0 ? `−${deltaTeo} exc.` : `+${Math.abs(deltaTeo)} em falta`}
                 </p>
               </div>
-              <div className="rounded-md bg-yellow-50 px-2 py-2 text-center">
-                <div className={`text-2xl font-display font-bold whitespace-nowrap ${dimensionamentoOk ? "text-success" : "text-danger"}`}>{pessoasNecessarias}</div>
-                <p className="text-[10px] text-yellow-600 mt-0.5">c/ Inefic.</p>
-                <p className={`text-[9px] font-medium ${dimensionamentoOk ? "text-success" : "text-danger"}`}>
+              <div className="rounded bg-yellow-50 px-1.5 py-1.5 text-center">
+                <div className={`text-xl font-display font-bold whitespace-nowrap ${dimensionamentoOk ? "text-success" : "text-danger"}`}>{pessoasNecessarias}</div>
+                <p className="text-[9px] text-yellow-600 mt-0.5">c/ Inefic.</p>
+                <p className={`text-[8px] font-medium leading-tight ${dimensionamentoOk ? "text-success" : "text-danger"}`}>
                   {!dimensionamentoTeoOk && !dimensionamentoOk
                     ? `+${Math.abs(delta)} em falta`
                     : dimensionamentoTeoOk && !dimensionamentoOk
-                    ? `+${Math.abs(delta)} em falta (inefic.)`
+                    ? `+${Math.abs(delta)} falta (inefic.)`
                     : delta === 0
                     ? "Correto"
                     : `−${delta} exc.`}
@@ -230,44 +227,44 @@ export default function Dashboard() {
         </Card>
 
         {/* Taxa Ocupação — dual */}
-        <Card className={`border-l-4 shadow-sm ${stats.taxaOcupacaoGlobal > 100 ? "border-l-danger" : stats.taxaOcupacaoGlobal >= 80 ? "border-l-warning" : "border-l-success"}`}>
-          <div className="p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-muted-foreground">Taxa Ocupação</span>
+        <Card className={`border-l-4 shadow-sm min-w-0 overflow-hidden ${stats.taxaOcupacaoGlobal > 100 ? "border-l-danger" : stats.taxaOcupacaoGlobal >= 80 ? "border-l-warning" : "border-l-success"}`}>
+          <div className="px-2.5 py-2">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-medium text-muted-foreground">Taxa Ocupação</span>
               <Tooltip>
-                <TooltipTrigger><Info className="h-3.5 w-3.5 text-muted-foreground" /></TooltipTrigger>
+                <TooltipTrigger><Info className="h-3 w-3 text-muted-foreground" /></TooltipTrigger>
                 <TooltipContent className="max-w-[280px] text-xs">Carga ÷ Capacidade × 100%. Real sem fator, Com ineficiência +20%</TooltipContent>
               </Tooltip>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-md bg-blue-50 px-2 py-2 text-center">
-                <div className={`text-2xl font-display font-bold whitespace-nowrap ${occupancyColor(stats.taxaOcupacaoTeorica)}`}>{stats.taxaOcupacaoTeorica.toFixed(0)}%</div>
-                <p className="text-[10px] text-blue-400 mt-0.5">Real</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              <div className="rounded bg-blue-50 px-1.5 py-1.5 text-center">
+                <div className={`text-xl font-display font-bold whitespace-nowrap ${occupancyColor(stats.taxaOcupacaoTeorica)}`}>{stats.taxaOcupacaoTeorica.toFixed(0)}%</div>
+                <p className="text-[9px] text-blue-400 mt-0.5">Real</p>
               </div>
-              <div className="rounded-md bg-yellow-50 px-2 py-2 text-center">
-                <div className={`text-2xl font-display font-bold whitespace-nowrap ${occupancyColor(stats.taxaOcupacaoGlobal)}`}>{stats.taxaOcupacaoGlobal.toFixed(0)}%</div>
-                <p className="text-[10px] text-yellow-600 mt-0.5">c/ Inefic.</p>
+              <div className="rounded bg-yellow-50 px-1.5 py-1.5 text-center">
+                <div className={`text-xl font-display font-bold whitespace-nowrap ${occupancyColor(stats.taxaOcupacaoGlobal)}`}>{stats.taxaOcupacaoGlobal.toFixed(0)}%</div>
+                <p className="text-[9px] text-yellow-600 mt-0.5">c/ Inefic.</p>
               </div>
             </div>
           </div>
         </Card>
 
         {/* Ocupação Equip. — single */}
-        <Card className="border-l-4 border-l-secondary shadow-sm">
-          <div className="p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-muted-foreground">Ocupação Equip.</span>
+        <Card className="border-l-4 border-l-secondary shadow-sm min-w-0">
+          <div className="px-2.5 py-2">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-medium text-muted-foreground">Ocup. Equip.</span>
               <Tooltip>
-                <TooltipTrigger><Info className="h-3.5 w-3.5 text-muted-foreground" /></TooltipTrigger>
+                <TooltipTrigger><Info className="h-3 w-3 text-muted-foreground" /></TooltipTrigger>
                 <TooltipContent className="max-w-[260px] text-xs">Σ(T.Máquina alocada) ÷ (Qtd. Normal × 480 min) × 100%</TooltipContent>
               </Tooltip>
             </div>
             <div className="space-y-0.5">
               {stats.taxaOcupacao.map((eq) => (
-                <div key={eq.equipmentName} className={`flex items-center justify-between text-xs px-1.5 py-0.5 rounded ${occupancyBg(eq.rate)}`}>
-                  <span className="font-medium truncate">{eq.equipmentName}</span>
-                  <span className={`font-bold ${occupancyColor(eq.rate)}`}>
-                    {eq.usesEmergency && <AlertTriangle className="inline h-3 w-3 text-warning mr-0.5 -mt-0.5" />}
+                <div key={eq.equipmentName} className={`flex items-center justify-between text-[10px] px-1 py-0.5 rounded ${occupancyBg(eq.rate)}`}>
+                  <span className="font-medium truncate mr-1">{eq.equipmentName}</span>
+                  <span className={`font-bold shrink-0 ${occupancyColor(eq.rate)}`}>
+                    {eq.usesEmergency && <AlertTriangle className="inline h-2.5 w-2.5 text-warning mr-0.5 -mt-0.5" />}
                     {eq.rate.toFixed(0)}%
                   </span>
                 </div>
@@ -277,24 +274,18 @@ export default function Dashboard() {
         </Card>
 
         {/* Overtime — single */}
-        <Card className={`border-l-4 shadow-sm ${schedule.hasOvertime ? "border-l-danger" : "border-l-success"}`}>
-          <div className="p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-muted-foreground">Overtime</span>
-              <Tooltip>
-                <TooltipTrigger><Info className="h-3.5 w-3.5 text-muted-foreground" /></TooltipTrigger>
-                <TooltipContent className="max-w-[260px] text-xs">Existem tarefas não concluídas antes das 16h ou operadores com carga &gt; 100%</TooltipContent>
-              </Tooltip>
-            </div>
+        <Card className={`border-l-4 shadow-sm min-w-0 ${schedule.hasOvertime ? "border-l-danger" : "border-l-success"}`}>
+          <div className="px-2.5 py-2 flex flex-col items-center justify-center h-full">
+            <span className="text-[11px] font-medium text-muted-foreground mb-1">Overtime</span>
             {schedule.hasOvertime ? (
-              <div className="flex items-center gap-1.5">
-                <XCircle className="h-5 w-5 text-danger" />
-                <span className="text-base font-display font-bold text-danger">Com overtime</span>
+              <div className="flex items-center gap-1">
+                <XCircle className="h-4 w-4 text-danger shrink-0" />
+                <span className="text-sm font-display font-bold text-danger">Com overtime</span>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5">
-                <CheckCircle className="h-5 w-5 text-success" />
-                <span className="text-base font-display font-bold text-success">Sem overtime</span>
+              <div className="flex items-center gap-1">
+                <CheckCircle className="h-4 w-4 text-success shrink-0" />
+                <span className="text-sm font-display font-bold text-success">Sem overtime</span>
               </div>
             )}
           </div>
