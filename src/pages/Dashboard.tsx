@@ -148,8 +148,8 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-7 gap-2">
         {/* Carga do Dia — dual */}
         <Card className="border-l-4 border-l-primary shadow-sm min-w-0 overflow-hidden">
-          <div className="px-2.5 py-2">
-            <div className="flex items-center justify-between mb-1.5">
+          <div className="px-2.5 py-2 flex flex-col items-center justify-center h-full">
+            <div className="flex items-center gap-1 mb-1.5">
               <span className="text-[11px] font-medium text-muted-foreground">Carga do Dia</span>
               <Tooltip>
                 <TooltipTrigger><Info className="h-3 w-3 text-muted-foreground" /></TooltipTrigger>
@@ -193,8 +193,8 @@ export default function Dashboard() {
 
         {/* Pessoas Necessárias — dual */}
         <Card className={`border-l-4 shadow-sm min-w-0 overflow-hidden ${dimensionamentoOk ? "border-l-success" : "border-l-danger"}`}>
-          <div className="px-2.5 py-2">
-            <div className="flex items-center justify-between mb-1.5">
+          <div className="px-2.5 py-2 flex flex-col items-center justify-center h-full">
+            <div className="flex items-center gap-1 mb-1.5">
               <span className="text-[11px] font-medium text-muted-foreground">Pessoas Nec.</span>
               <Tooltip>
                 <TooltipTrigger><Info className="h-3 w-3 text-muted-foreground" /></TooltipTrigger>
@@ -228,8 +228,8 @@ export default function Dashboard() {
 
         {/* Taxa Ocupação — dual */}
         <Card className={`border-l-4 shadow-sm min-w-0 overflow-hidden ${stats.taxaOcupacaoGlobal > 100 ? "border-l-danger" : stats.taxaOcupacaoGlobal >= 80 ? "border-l-warning" : "border-l-success"}`}>
-          <div className="px-2.5 py-2">
-            <div className="flex items-center justify-between mb-1.5">
+          <div className="px-2.5 py-2 flex flex-col items-center justify-center h-full">
+            <div className="flex items-center gap-1 mb-1.5">
               <span className="text-[11px] font-medium text-muted-foreground">Taxa Ocupação</span>
               <Tooltip>
                 <TooltipTrigger><Info className="h-3 w-3 text-muted-foreground" /></TooltipTrigger>
@@ -251,8 +251,8 @@ export default function Dashboard() {
 
         {/* Ocupação Equip. — single */}
         <Card className="border-l-4 border-l-secondary shadow-sm min-w-0">
-          <div className="px-2.5 py-2">
-            <div className="flex items-center justify-between mb-1.5">
+          <div className="px-2.5 py-2 flex flex-col items-center justify-center h-full">
+            <div className="flex items-center gap-1 mb-1.5">
               <span className="text-[11px] font-medium text-muted-foreground">Ocup. Equip.</span>
               <Tooltip>
                 <TooltipTrigger><Info className="h-3 w-3 text-muted-foreground" /></TooltipTrigger>
