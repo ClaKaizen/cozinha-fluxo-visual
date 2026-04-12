@@ -242,6 +242,7 @@ export default function GanttChart({ schedule }: GanttChartProps) {
         axisEnd={sharedAxisEnd}
         emptyMessage="Sem máquinas utilizadas neste dia."
         legend={legend}
+        rowLunchBreaks={schedule.machineLunchBreaks}
       />
       <GanttSection<OperatorTask>
         title="Ocupação dos Operadores"
