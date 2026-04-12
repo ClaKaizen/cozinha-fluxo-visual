@@ -7,6 +7,7 @@ import {
   type DailyGanttSchedule,
   type GanttRow,
   type MachineTask,
+  type OperatorLunchBreak,
   type OperatorTask,
   type TimelineSegment,
 } from "@/components/gantt/scheduler";
@@ -41,10 +42,9 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
   axisEnd: number;
   emptyMessage: string;
   legend: { id: string; label: string; colorIndex: number }[];
-  lunchStart: number;
-  lunchEnd: number;
+  rowLunchBreaks?: Record<string, OperatorLunchBreak>;
 }) {
-  const { title, rows, axisEnd, emptyMessage, legend, lunchStart, lunchEnd } = props;
+  const { title, rows, axisEnd, emptyMessage, legend, rowLunchBreaks } = props;
 
   if (rows.length === 0) {
     return (
@@ -68,10 +68,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
   const chartWidth = Math.max(760, totalSpan * pixelsPerMinute);
   const toPercent = (minutes: number) => ((minutes - DAY_START) / totalSpan) * 100;
   const markers = Array.from({ length: Math.floor((axisEnd - DAY_START) / 30) + 1 }, (_, i) => DAY_START + i * 30);
-  const lunchLeft = toPercent(lunchStart);
-  const lunchWidth = ((lunchEnd - lunchStart) / totalSpan) * 100;
   const totalHeight = rows.length * rowHeight;
-  const showLunchBand = rows.some((row) => row.tasks.length > 0);
 
   // 16:00 hard stop line
   const hardStopLeft = toPercent(DAY_END);
@@ -92,17 +89,18 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               ))}
             </div>
             <div className="relative">
-              {/* Lunch break band */}
-              {showLunchBand && (
-                <div className="absolute z-0 rounded bg-muted/60" style={{ left: labelWidth + (lunchLeft / 100) * chartWidth, width: (lunchWidth / 100) * chartWidth, top: 0, height: totalHeight }} />
-              )}
               {/* 16:00 hard stop line */}
               <div className="absolute z-[5]" style={{ left: labelWidth + (hardStopLeft / 100) * chartWidth, top: 0, height: totalHeight, width: 2, backgroundColor: 'hsl(var(--destructive))' }} />
               {markers.map((m) => (
                 <div key={m} className={`absolute z-0 ${m % 60 === 0 ? "border-l border-border/50" : "border-l border-border/25"}`} style={{ left: labelWidth + (toPercent(m) / 100) * chartWidth, top: 0, height: totalHeight }} />
               ))}
-              {rows.map((row) => {
+              {rows.map((row, rowIndex) => {
                 const isEmergency = isEmergencyRowFn(row.label);
+                // Per-row lunch band
+                const rowLunch = rowLunchBreaks?.[row.label];
+                const lunchLeft = rowLunch ? toPercent(rowLunch.start) : 0;
+                const lunchWidth = rowLunch ? ((rowLunch.end - rowLunch.start) / totalSpan) * 100 : 0;
+
                 return (
                 <div key={row.label} className={`relative flex items-center ${isEmergency ? "bg-orange-50 dark:bg-orange-950/20" : ""}`} style={{ height: rowHeight }}>
                   <div className="truncate pr-3 text-xs font-semibold text-foreground flex items-center gap-1" style={{ width: labelWidth }}>
@@ -114,6 +112,17 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                     ) : row.label}
                   </div>
                   <div className={`relative h-full flex-1 border-b ${isEmergency ? "border-dashed border-orange-400/50 bg-orange-50/50 dark:bg-orange-950/10" : "border-border/30 bg-muted/5"}`} style={{ width: chartWidth }}>
+                    {/* Per-row lunch band */}
+                    {rowLunch && (
+                      <div
+                        className="absolute top-0 z-[1] rounded bg-muted/60"
+                        style={{
+                          left: `${lunchLeft}%`,
+                          width: `${lunchWidth}%`,
+                          height: rowHeight,
+                        }}
+                      />
+                    )}
                     {row.tasks.map((task) =>
                       task.segments.map((seg, si) => {
                         const left = toPercent(seg.start);
@@ -166,10 +175,12 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                   </div>
                 );
               })}
-              <div className="flex items-center gap-1.5">
-                <div className="h-3 w-3 rounded-sm bg-muted" />
-                <span className="text-muted-foreground">Almoço (variável 12h–14h)</span>
-              </div>
+              {rowLunchBreaks && (
+                <div className="flex items-center gap-1.5">
+                  <div className="h-3 w-3 rounded-sm bg-muted" />
+                  <span className="text-muted-foreground">Almoço (variável 12h–14h)</span>
+                </div>
+              )}
               <div className="flex items-center gap-1.5">
                 <div className="h-3 w-3 rounded-sm border border-dashed border-orange-400 bg-orange-100" />
                 <span className="text-muted-foreground">Emergência</span>
@@ -221,7 +232,7 @@ export default function GanttChart({ schedule }: GanttChartProps) {
     );
   }
 
-  const sharedAxisEnd = Math.max(schedule.axisEnd, DAY_END + 30); // extend to 16:30 for overflow visibility
+  const sharedAxisEnd = Math.max(schedule.axisEnd, DAY_END + 30);
 
   return (
     <div className="space-y-4">
@@ -231,8 +242,6 @@ export default function GanttChart({ schedule }: GanttChartProps) {
         axisEnd={sharedAxisEnd}
         emptyMessage="Sem máquinas utilizadas neste dia."
         legend={legend}
-        lunchStart={schedule.lunchStart}
-        lunchEnd={schedule.lunchEnd}
       />
       <GanttSection<OperatorTask>
         title="Ocupação dos Operadores"
@@ -240,12 +249,10 @@ export default function GanttChart({ schedule }: GanttChartProps) {
         axisEnd={sharedAxisEnd}
         emptyMessage="Sem operadores presentes na Escala para este dia."
         legend={legend}
-        lunchStart={schedule.lunchStart}
-        lunchEnd={schedule.lunchEnd}
+        rowLunchBreaks={schedule.operatorLunchBreaks}
       />
       <OperatorTaskSequence schedule={schedule} />
 
-      {/* Unscheduled tasks warning */}
       {schedule.unscheduledTasks.length > 0 && (
         <Card className="border-destructive/50">
           <CardHeader className="pb-2">

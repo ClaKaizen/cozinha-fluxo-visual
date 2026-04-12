@@ -10,7 +10,7 @@ import {
 
 export const DAY_START = 7 * 60;    // 420
 export const DAY_END = 16 * 60;     // 960
-export const AVAILABLE_MACHINE_MINUTES = 480; // 9h total - 1h lunch = 8h
+export const AVAILABLE_MACHINE_MINUTES = 480; // 8h useful operator time
 
 export interface TimelineSegment {
   start: number;
@@ -73,6 +73,11 @@ export interface UnscheduledTask {
   dosesRemaining: number;
 }
 
+export interface OperatorLunchBreak {
+  start: number;
+  end: number;
+}
+
 export interface DailyGanttSchedule {
   tasks: PlanningTask[];
   machineRows: GanttRow<MachineTask>[];
@@ -85,6 +90,7 @@ export interface DailyGanttSchedule {
   lunchStart: number;
   lunchEnd: number;
   hasOvertime: boolean;
+  operatorLunchBreaks: Record<string, OperatorLunchBreak>;
 }
 
 export interface OperatorPresence {
@@ -144,6 +150,17 @@ function createSegments(start: number, duration: number, lunchStart: number, lun
   return { start: normalizedStart, end: segments.length > 0 ? segments[segments.length - 1].end : normalizedStart, segments };
 }
 
+// No-lunch versions for machine scheduling
+const NO_LUNCH = DAY_END + 999; // value that never triggers lunch logic
+
+function createMachineSegments(start: number, duration: number): { start: number; end: number; segments: TimelineSegment[] } {
+  return createSegments(start, duration, NO_LUNCH, NO_LUNCH);
+}
+
+function normalizeMachineCursor(cursor: number): number {
+  return normalizeCursor(cursor, NO_LUNCH, NO_LUNCH);
+}
+
 export function formatClock(minutes: number): string {
   const safeMinutes = Math.max(0, Math.floor(minutes));
   const h = Math.floor(safeMinutes / 60);
@@ -151,13 +168,21 @@ export function formatClock(minutes: number): string {
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
 }
 
+interface OperatorAssignment {
+  task: PlanningTask;
+  machineStart: number;
+  machineLabel: string;
+  machineTaskId: string;
+  showSimultaneousBadge: boolean;
+}
+
 function buildWithLunch(
   tasks: PlanningTask[],
   equipment: Equipment[],
   equipmentMap: Map<string, Equipment>,
   operatorNames: string[],
-  lunchStart: number,
-  lunchEnd: number,
+  targetLunchStart: number,
+  targetLunchEnd: number,
 ): Omit<DailyGanttSchedule, 'tasks' | 'lunchStart' | 'lunchEnd'> {
   const machineSlots = new Map<string, number[]>();
   equipment.forEach((eq) => {
@@ -204,6 +229,7 @@ function buildWithLunch(
     return simultaneousPhase.length > 0 ? [...sequentialPhases, simultaneousPhase] : sequentialPhases;
   };
 
+  // Machine scheduling: NO lunch break — machines run continuously
   const evaluatePhase = (
     phaseBookings: MachineBooking[],
     minStart: number,
@@ -237,21 +263,19 @@ function buildWithLunch(
           minStart,
           ...selections.flatMap((selection) =>
             selection.slotIndices.map((slotIndex) =>
-              normalizeCursor(
+              normalizeMachineCursor(
                 Math.max(machineSlots.get(selection.equipmentId)?.[slotIndex] ?? DAY_START, minStart),
-                lunchStart,
-                lunchEnd,
               ),
             ),
           ),
         );
-        const phaseStart = normalizeCursor(rawStart, lunchStart, lunchEnd);
+        const phaseStart = normalizeMachineCursor(rawStart);
         const assignments: PhaseAssignment[] = [];
 
         for (const selection of selections) {
           selection.bookings.forEach((booking, bookingIndex) => {
             const machineIdx = selection.slotIndices[bookingIndex];
-            const scheduled = createSegments(phaseStart, booking.duration, lunchStart, lunchEnd);
+            const scheduled = createMachineSegments(phaseStart, booking.duration);
             if (requireWithinDay && scheduled.segments.some((segment) => segment.overflow)) {
               assignments.length = 0;
               return;
@@ -355,7 +379,6 @@ function buildWithLunch(
 
   const machineRows = Array.from(machineRowsMap.values())
     .filter((row) => {
-      // Always show normal machines; only show emergency if they have tasks
       if (row.label.includes("⚠️")) return row.tasks.length > 0;
       return true;
     })
@@ -368,7 +391,7 @@ function buildWithLunch(
       return (am?.[1] ?? a.label).localeCompare(bm?.[1] ?? b.label) || Number(am?.[2] ?? 0) - Number(bm?.[2] ?? 0);
     });
 
-  // ── STEP 3: Operator scheduling — balance load, hard cap 480 min ──
+  // ── STEP 3: Operator scheduling with PER-OPERATOR lunch breaks ──
   const allOperatorNames = operatorNames.length > 0 ? operatorNames : [];
 
   const operatorRowsMap = new Map<string, GanttRow<OperatorTask>>(
@@ -376,6 +399,12 @@ function buildWithLunch(
   );
 
   const unscheduledTasks: UnscheduledTask[] = [];
+  const operatorLunchBreaks: Record<string, OperatorLunchBreak> = {};
+
+  // Initialize all operators with default lunch = target
+  allOperatorNames.forEach((name) => {
+    operatorLunchBreaks[name] = { start: targetLunchStart, end: targetLunchEnd };
+  });
 
   const incrementUnscheduled = (artigo: string) => {
     const existing = unscheduledTasks.find((item) => item.artigo === artigo);
@@ -387,9 +416,7 @@ function buildWithLunch(
   };
 
   if (allOperatorNames.length > 0) {
-    const operatorAvailability = new Map(allOperatorNames.map((name) => [name, DAY_START]));
-    const operatorTotalMinutes = new Map(allOperatorNames.map((name) => [name, 0]));
-
+    // Build operator task sources from machine schedule
     const operatorSources = tasks
       .map((task) => {
         const relatedMachineTasks = taskMachinesMap.get(task.id) ?? [];
@@ -413,6 +440,13 @@ function buildWithLunch(
       .filter((item): item is NonNullable<typeof item> => item !== null)
       .sort((a, b) => a.start - b.start || a.machineLabel.localeCompare(b.machineLabel));
 
+    // PASS 1: Assign tasks to operators using target lunch (determines WHO does WHAT)
+    const operatorAvailability = new Map(allOperatorNames.map((name) => [name, DAY_START]));
+    const operatorTotalMinutes = new Map(allOperatorNames.map((name) => [name, 0]));
+    const assignmentsByOperator = new Map<string, OperatorAssignment[]>(
+      allOperatorNames.map((name) => [name, []])
+    );
+
     operatorSources.forEach(({ task, start, machineLabel, machineTaskId, showSimultaneousBadge, hasOverflow }) => {
       if (task.operatorDuration <= 0 || hasOverflow) return;
 
@@ -423,11 +457,11 @@ function buildWithLunch(
       for (const name of allOperatorNames) {
         const avail = operatorAvailability.get(name) ?? DAY_START;
         const total = operatorTotalMinutes.get(name) ?? 0;
-        const candidateStart = normalizeCursor(Math.max(avail, start), lunchStart, lunchEnd);
+        const candidateStart = normalizeCursor(Math.max(avail, start), targetLunchStart, targetLunchEnd);
 
         if (total + task.operatorDuration > AVAILABLE_MACHINE_MINUTES) continue;
 
-        const testSeg = createSegments(candidateStart, task.operatorDuration, lunchStart, lunchEnd);
+        const testSeg = createSegments(candidateStart, task.operatorDuration, targetLunchStart, targetLunchEnd);
         if (testSeg.segments.some((s) => s.overflow)) continue;
 
         if (chosen === null || total < chosenTotal || (total === chosenTotal && candidateStart < chosenStart)) {
@@ -442,23 +476,66 @@ function buildWithLunch(
         return;
       }
 
-      const actualStart = normalizeCursor(Math.max(operatorAvailability.get(chosen) ?? DAY_START, start), lunchStart, lunchEnd);
-      const scheduled = createSegments(actualStart, task.operatorDuration, lunchStart, lunchEnd);
+      // Record assignment
+      assignmentsByOperator.get(chosen)!.push({ task, machineStart: start, machineLabel, machineTaskId, showSimultaneousBadge });
+
+      // Update availability for next assignment (using target lunch for consistency in pass 1)
+      const actualStart = normalizeCursor(Math.max(operatorAvailability.get(chosen) ?? DAY_START, start), targetLunchStart, targetLunchEnd);
+      const scheduled = createSegments(actualStart, task.operatorDuration, targetLunchStart, targetLunchEnd);
       operatorAvailability.set(chosen, scheduled.end);
       operatorTotalMinutes.set(chosen, (operatorTotalMinutes.get(chosen) ?? 0) + task.operatorDuration);
-
-      const ot: OperatorTask = {
-        ...task,
-        operatorName: chosen,
-        start: scheduled.start,
-        end: scheduled.end,
-        segments: scheduled.segments,
-        machineTaskId,
-        machineLabel,
-        showSimultaneousBadge,
-      };
-      operatorRowsMap.get(chosen)?.tasks.push(ot);
     });
+
+    // PASS 2: Calculate per-operator lunch and re-schedule with individual lunch breaks
+    for (const [name, assignments] of assignmentsByOperator) {
+      if (assignments.length === 0) continue;
+
+      assignments.sort((a, b) => a.machineStart - b.machineStart);
+
+      // Pass 2A: Simulate schedule WITHOUT lunch to find natural task positions
+      let tempCursor = DAY_START;
+      let opLunchStart = targetLunchStart;
+
+      for (const a of assignments) {
+        tempCursor = Math.max(tempCursor, a.machineStart);
+        const tempEnd = tempCursor + a.task.operatorDuration;
+
+        // Does this task naturally overlap with the target lunch window?
+        if (a.machineStart < targetLunchStart + 30 && tempEnd > targetLunchStart) {
+          if (tempEnd <= targetLunchStart + 45) {
+            opLunchStart = Math.max(opLunchStart, tempEnd);
+          } else {
+            // Flag case: heavy workload, but still shift lunch
+            opLunchStart = Math.max(opLunchStart, tempEnd);
+          }
+        }
+        tempCursor = tempEnd;
+      }
+
+      const opLunchEnd = opLunchStart + 60;
+      operatorLunchBreaks[name] = { start: opLunchStart, end: opLunchEnd };
+
+      // Pass 2B: Re-schedule all tasks with the individual lunch break
+      let cursor = DAY_START;
+      for (const a of assignments) {
+        cursor = Math.max(cursor, a.machineStart);
+        cursor = normalizeCursor(cursor, opLunchStart, opLunchEnd);
+        const scheduled = createSegments(cursor, a.task.operatorDuration, opLunchStart, opLunchEnd);
+
+        const ot: OperatorTask = {
+          ...a.task,
+          operatorName: name,
+          start: scheduled.start,
+          end: scheduled.end,
+          segments: scheduled.segments,
+          machineTaskId: a.machineTaskId,
+          machineLabel: a.machineLabel,
+          showSimultaneousBadge: a.showSimultaneousBadge,
+        };
+        operatorRowsMap.get(name)?.tasks.push(ot);
+        cursor = scheduled.end;
+      }
+    }
   }
 
   const operatorRows = Array.from(operatorRowsMap.values());
@@ -479,6 +556,7 @@ function buildWithLunch(
     overflowTasks,
     unscheduledTasks,
     hasOvertime,
+    operatorLunchBreaks,
   };
 }
 
@@ -495,7 +573,6 @@ export function buildDailyGanttSchedule({
   const categoryMap = new Map(categories.map((item) => [item.id, item]));
   const equipmentMap = new Map(equipment.map((item) => [item.id, item]));
 
-  // Expand production into per-dose tasks
   const tasks: PlanningTask[] = [];
   production
     .filter((entry) => normalizeDateKey(entry.date) === selectedDate)
@@ -580,6 +657,7 @@ export function buildDailyGanttSchedule({
       tasks: [], machineRows: [], operatorRows: [], axisEnd: DAY_END,
       usesEmergencyEquipment: false, emergencyEquipmentNames: [], overflowTasks: [],
       unscheduledTasks: [], lunchStart: 13 * 60, lunchEnd: 14 * 60, hasOvertime: false,
+      operatorLunchBreaks: {},
     };
   }
 
@@ -587,16 +665,15 @@ export function buildDailyGanttSchedule({
     .filter((e) => WORKING_CODES.includes(e.code) && !e.absent)
     .map((e) => e.operator.nome);
 
-  // Add temp operators
   const tempOpsForDate = tempOperators.filter((t) => t.date === selectedDate);
   const allOpNames = [...operatorNames, ...tempOpsForDate.map((t) => t.nome)];
 
-  // Try 4 lunch positions: 12:00, 12:30, 13:00, 13:30 start
+  // Try 4 lunch target positions: 12:00, 12:30, 13:00, 13:30 start
   const lunchOptions: [number, number][] = [
-    [12 * 60, 13 * 60],       // 12:00–13:00
-    [12 * 60 + 30, 13 * 60 + 30], // 12:30–13:30
-    [13 * 60, 14 * 60],       // 13:00–14:00
-    [13 * 60 + 30, 14 * 60 + 30], // 13:30–14:30 (edge: ends at 14:30 which is still valid within window)
+    [12 * 60, 13 * 60],
+    [12 * 60 + 30, 13 * 60 + 30],
+    [13 * 60, 14 * 60],
+    [13 * 60 + 30, 14 * 60 + 30],
   ];
 
   let bestResult: Omit<DailyGanttSchedule, 'tasks' | 'lunchStart' | 'lunchEnd'> | null = null;
@@ -616,8 +693,6 @@ export function buildDailyGanttSchedule({
   const best = bestResult!;
   const chosenLunchStart = bestLunch[0];
   const chosenLunchEnd = bestLunch[1];
-
-  void tempOperators;
 
   return {
     tasks,

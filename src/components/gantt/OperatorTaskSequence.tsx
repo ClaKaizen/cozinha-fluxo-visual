@@ -72,7 +72,12 @@ export default function OperatorTaskSequence({ schedule }: OperatorTaskSequenceP
                 );
                 const idleMinutes = Math.max(0, AVAILABLE_MACHINE_MINUTES - occupiedMinutes);
                 const occupancy = AVAILABLE_MACHINE_MINUTES > 0 ? (occupiedMinutes / AVAILABLE_MACHINE_MINUTES) * 100 : 0;
-                const { entries, lunchLabel } = buildEntries(row.tasks, schedule.lunchStart, schedule.lunchEnd, showLunch);
+
+                // Use per-operator lunch break
+                const opLunch = schedule.operatorLunchBreaks[row.label];
+                const opLunchStart = opLunch?.start ?? schedule.lunchStart;
+                const opLunchEnd = opLunch?.end ?? schedule.lunchEnd;
+                const { entries, lunchLabel } = buildEntries(row.tasks, opLunchStart, opLunchEnd, showLunch);
 
                 return (
                   <div key={row.label} className="overflow-hidden rounded-lg border bg-card">
