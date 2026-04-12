@@ -576,6 +576,24 @@ function buildWithLunch(
   }
 
   const operatorRows = Array.from(operatorRowsMap.values());
+
+  // ── Compute per-machine lunch breaks ──
+  // A machine's lunch band = the window when ALL operators are at lunch
+  const machineLunchBreaks: Record<string, OperatorLunchBreak> = {};
+  if (allOperatorNames.length > 0 && Object.keys(operatorLunchBreaks).length > 0) {
+    const allBreaks = Object.values(operatorLunchBreaks);
+    // Machine can't start new tasks when ALL operators are at lunch
+    // The overlap of all individual lunches = [max of all starts, min of all ends]
+    const overlapStart = Math.max(...allBreaks.map(b => b.start));
+    const overlapEnd = Math.min(...allBreaks.map(b => b.end));
+    if (overlapStart < overlapEnd) {
+      // Apply this band to all machine rows
+      for (const row of machineRows) {
+        machineLunchBreaks[row.label] = { start: overlapStart, end: overlapEnd };
+      }
+    }
+  }
+
   const latestEnd = Math.max(
     DAY_END,
     ...machineTasks.map((t) => t.end),
@@ -594,6 +612,7 @@ function buildWithLunch(
     unscheduledTasks,
     hasOvertime,
     operatorLunchBreaks,
+    machineLunchBreaks,
   };
 }
 
