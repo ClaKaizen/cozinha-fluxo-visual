@@ -268,6 +268,12 @@ export default function GanttChart({ schedule }: GanttChartProps) {
       />
       <OperatorTaskSequence schedule={schedule} />
 
+      {schedule.staffingWarning && (
+        <div className="flex items-center gap-2 rounded-md border border-amber-400/50 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+          <span>{schedule.staffingWarning}</span>
+        </div>
+      )}
+
       {schedule.unscheduledTasks.length > 0 && (
         <Card className="border-destructive/50">
           <CardHeader className="pb-2">
