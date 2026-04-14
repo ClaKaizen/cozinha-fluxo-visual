@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DAY_END,
   DAY_START,
+  OPERATOR_HARD_STOP,
+  MACHINE_TARGET_STOP,
   formatClock,
   type DailyGanttSchedule,
   type GanttRow,
@@ -43,8 +45,10 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
   emptyMessage: string;
   legend: { id: string; label: string; colorIndex: number }[];
   rowLunchBreaks?: Record<string, OperatorLunchBreak>;
+  hardStopMinutes: number;
+  secondaryStopMinutes?: number;
 }) {
-  const { title, rows, axisEnd, emptyMessage, legend, rowLunchBreaks } = props;
+  const { title, rows, axisEnd, emptyMessage, legend, rowLunchBreaks, hardStopMinutes, secondaryStopMinutes } = props;
 
   if (rows.length === 0) {
     return (
@@ -70,8 +74,8 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
   const markers = Array.from({ length: Math.floor((axisEnd - DAY_START) / 30) + 1 }, (_, i) => DAY_START + i * 30);
   const totalHeight = rows.length * rowHeight;
 
-  // 16:00 hard stop line
-  const hardStopLeft = toPercent(DAY_END);
+  const hardStopLeft = toPercent(hardStopMinutes);
+  const secondaryStopLeft = secondaryStopMinutes ? toPercent(secondaryStopMinutes) : null;
 
   return (
     <Card>
@@ -89,14 +93,17 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               ))}
             </div>
             <div className="relative">
-              {/* 16:00 hard stop line */}
+              {/* Primary hard stop line (solid red) */}
               <div className="absolute z-[5]" style={{ left: labelWidth + (hardStopLeft / 100) * chartWidth, top: 0, height: totalHeight, width: 2, backgroundColor: 'hsl(var(--destructive))' }} />
+              {/* Secondary stop line (dashed orange) */}
+              {secondaryStopLeft !== null && (
+                <div className="absolute z-[4]" style={{ left: labelWidth + (secondaryStopLeft / 100) * chartWidth, top: 0, height: totalHeight, width: 0, borderLeft: '2px dashed hsl(38 92% 50%)' }} />
+              )}
               {markers.map((m) => (
                 <div key={m} className={`absolute z-0 ${m % 60 === 0 ? "border-l border-border/50" : "border-l border-border/25"}`} style={{ left: labelWidth + (toPercent(m) / 100) * chartWidth, top: 0, height: totalHeight }} />
               ))}
-              {rows.map((row, rowIndex) => {
+              {rows.map((row) => {
                 const isEmergency = isEmergencyRowFn(row.label);
-                // Per-row lunch band
                 const rowLunch = rowLunchBreaks?.[row.label];
                 const lunchLeft = rowLunch ? toPercent(rowLunch.start) : 0;
                 const lunchWidth = rowLunch ? ((rowLunch.end - rowLunch.start) / totalSpan) * 100 : 0;
@@ -112,7 +119,6 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                     ) : row.label}
                   </div>
                   <div className={`relative h-full flex-1 border-b ${isEmergency ? "border-dashed border-orange-400/50 bg-orange-50/50 dark:bg-orange-950/10" : "border-border/30 bg-muted/5"}`} style={{ width: chartWidth }}>
-                    {/* Per-row lunch band */}
                     {rowLunch && (
                       <div
                         className="absolute top-0 z-[1] rounded bg-muted/60"
@@ -195,7 +201,11 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="h-3 w-3 rounded-sm border border-dashed border-red-500 bg-red-100/60" />
-                <span className="text-muted-foreground">Overflow após 16:00</span>
+                <span className="text-muted-foreground">Overflow após 15:30</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="h-0.5 w-3 border-t-2 border-dashed" style={{ borderColor: 'hsl(38 92% 50%)' }} />
+                <span className="text-muted-foreground">Limite máquinas 15:40</span>
               </div>
             </div>
           </div>
@@ -243,6 +253,8 @@ export default function GanttChart({ schedule }: GanttChartProps) {
         emptyMessage="Sem máquinas utilizadas neste dia."
         legend={legend}
         rowLunchBreaks={schedule.machineLunchBreaks}
+        hardStopMinutes={MACHINE_TARGET_STOP}
+        secondaryStopMinutes={OPERATOR_HARD_STOP}
       />
       <GanttSection<OperatorTask>
         title="Ocupação dos Operadores"
@@ -251,6 +263,8 @@ export default function GanttChart({ schedule }: GanttChartProps) {
         emptyMessage="Sem operadores presentes na Escala para este dia."
         legend={legend}
         rowLunchBreaks={schedule.operatorLunchBreaks}
+        hardStopMinutes={OPERATOR_HARD_STOP}
+        secondaryStopMinutes={MACHINE_TARGET_STOP}
       />
       <OperatorTaskSequence schedule={schedule} />
 
