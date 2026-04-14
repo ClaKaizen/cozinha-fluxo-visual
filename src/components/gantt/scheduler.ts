@@ -13,6 +13,10 @@ export const DAY_END = 16 * 60;            // 960 — 16:00 (axis extent for ove
 export const OPERATOR_HARD_STOP = 15 * 60 + 30;  // 930 — 15:30
 export const MACHINE_TARGET_STOP = 15 * 60 + 40; // 940 — 15:40
 export const AVAILABLE_MACHINE_MINUTES = 480;
+const LUNCH_WINDOW_START = 12 * 60;  // 720
+const LUNCH_LATEST_START = 13 * 60;  // 780
+const LUNCH_DURATION = 60;
+const OPERATOR_PRODUCTIVE_MINUTES = 450; // 07:00–15:30 minus 60min lunch
 
 // ── Shared types ──────────────────────────────────────────────
 
@@ -96,6 +100,7 @@ export interface DailyGanttSchedule {
   hasOvertime: boolean;
   operatorLunchBreaks: Record<string, OperatorLunchBreak>;
   machineLunchBreaks: Record<string, OperatorLunchBreak>;
+  staffingWarning?: string;
 }
 
 export interface OperatorPresence {
@@ -129,293 +134,258 @@ export function formatClock(minutes: number): string {
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
 }
 
-function normalizeCursor(cursor: number, lunchStart: number, lunchEnd: number): number {
-  if (cursor < DAY_START) return DAY_START;
-  if (cursor >= lunchStart && cursor < lunchEnd) return lunchEnd;
-  return cursor;
+// ── Operator state tracker ──────────────────────────────
+
+interface OperatorState {
+  name: string;
+  cursor: number;        // next available time
+  totalWorked: number;   // total productive minutes
+  hadLunch: boolean;
+  lunchStart: number;
+  lunchEnd: number;
 }
 
-function createSegments(start: number, duration: number, lunchStart: number, lunchEnd: number): { start: number; end: number; segments: TimelineSegment[] } {
-  let cursor = normalizeCursor(start, lunchStart, lunchEnd);
-  const segments: TimelineSegment[] = [];
-  const normalizedStart = cursor;
-  let remaining = Math.max(0, duration);
+function operatorIsFreeAt(op: OperatorState, start: number, duration: number): boolean {
+  if (op.totalWorked + duration > OPERATOR_PRODUCTIVE_MINUTES) return false;
 
-  while (remaining > 0) {
-    cursor = normalizeCursor(cursor, lunchStart, lunchEnd);
-    let nextBoundary = cursor + remaining;
-    if (cursor < lunchStart) nextBoundary = Math.min(nextBoundary, lunchStart);
-    if (cursor < OPERATOR_HARD_STOP) nextBoundary = Math.min(nextBoundary, OPERATOR_HARD_STOP);
+  let effectiveStart = Math.max(op.cursor, start);
 
-    const isOverflow = cursor >= OPERATOR_HARD_STOP;
-    segments.push({
-      start: cursor,
-      end: isOverflow ? cursor + remaining : nextBoundary,
-      overflow: isOverflow,
-    });
-
-    if (isOverflow) break;
-
-    remaining -= nextBoundary - cursor;
-    cursor = nextBoundary;
-    if (remaining > 0 && cursor === lunchStart) cursor = lunchEnd;
-  }
-
-  return { start: normalizedStart, end: segments.length > 0 ? segments[segments.length - 1].end : normalizedStart, segments };
-}
-
-// Machine segments: no lunch break — machines run continuously
-// Overflow = new block starting at or after MACHINE_TARGET_STOP
-function createMachineSegments(start: number, duration: number): { start: number; end: number; segments: TimelineSegment[] } {
-  let cursor = Math.max(start, DAY_START);
-  const segments: TimelineSegment[] = [];
-  let remaining = Math.max(0, duration);
-
-  while (remaining > 0) {
-    const isOverflow = cursor >= MACHINE_TARGET_STOP;
-    const end = cursor + remaining;
-    segments.push({ start: cursor, end, overflow: isOverflow });
-    break; // machines run continuously, single segment
-  }
-
-  return { start: cursor, end: cursor + Math.max(0, duration), segments };
-}
-
-// ── Combinatorics helper ──────────────────────────────────
-
-function buildCombinations(indices: number[], count: number): number[][] {
-  if (count === 0) return [[]];
-  const results: number[][] = [];
-  const current: number[] = [];
-  const walk = (startIndex: number) => {
-    if (current.length === count) { results.push([...current]); return; }
-    for (let i = startIndex; i < indices.length; i++) {
-      current.push(indices[i]);
-      walk(i + 1);
-      current.pop();
+  // If we haven't had lunch and the task would overlap or push past lunch constraints
+  if (!op.hadLunch) {
+    // If we're in the lunch window and haven't eaten, we must eat first
+    if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < op.lunchEnd) {
+      // Can we eat now (before LUNCH_LATEST_START)?
+      const lunchStart = Math.max(effectiveStart, LUNCH_WINDOW_START);
+      if (lunchStart > LUNCH_LATEST_START) return false; // too late for lunch
+      effectiveStart = lunchStart + LUNCH_DURATION;
     }
-  };
-  walk(0);
-  return results;
+    // If the task would end past LUNCH_LATEST_START and we haven't eaten
+    if (effectiveStart + duration > LUNCH_LATEST_START && effectiveStart < LUNCH_WINDOW_START) {
+      // Task runs past 13:00 but starts before 12:00 - that's fine, lunch after
+      // But the task end must not prevent lunch by 13:00
+      // Actually: if task ends after LUNCH_LATEST_START, operator must eat first
+      // Only if task would push lunch start past 13:00
+    }
+  } else {
+    // Already had lunch - skip lunch window
+    if (effectiveStart >= op.lunchStart && effectiveStart < op.lunchEnd) {
+      effectiveStart = op.lunchEnd;
+    }
+  }
+
+  if (effectiveStart + duration > OPERATOR_HARD_STOP) return false;
+
+  return true;
 }
 
-// ── Phase structures ──────────────────────────────────
+/**
+ * Get the earliest time an operator can start a task of given duration.
+ * Returns the start time or -1 if impossible.
+ */
+function getOperatorEarliestStart(op: OperatorState, minStart: number, duration: number): number {
+  if (op.totalWorked + duration > OPERATOR_PRODUCTIVE_MINUTES) return -1;
 
-interface PhaseAssignment {
-  booking: MachineBooking;
-  machineIdx: number;
-  scheduled: { start: number; end: number; segments: TimelineSegment[] };
+  let effectiveStart = Math.max(op.cursor, minStart);
+
+  if (!op.hadLunch) {
+    // Before lunch window: check if task would push lunch past 13:00
+    if (effectiveStart < LUNCH_WINDOW_START) {
+      const taskEnd = effectiveStart + duration;
+      if (taskEnd > LUNCH_LATEST_START) {
+        // Task would end after 13:00 - must eat lunch first at latest 13:00
+        // But lunch window hasn't started, so push task to after lunch
+        // Schedule lunch at LUNCH_WINDOW_START (earliest)
+        effectiveStart = LUNCH_WINDOW_START + LUNCH_DURATION;
+      } else if (taskEnd > LUNCH_WINDOW_START) {
+        // Task ends between 12:00 and 13:00 - OK, lunch after task
+        // Fine as-is
+      }
+      // else task ends before 12:00 - fine
+    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < LUNCH_LATEST_START + LUNCH_DURATION) {
+      // We're in the lunch window - must eat first
+      const lunchStart = Math.min(Math.max(effectiveStart, LUNCH_WINDOW_START), LUNCH_LATEST_START);
+      effectiveStart = lunchStart + LUNCH_DURATION;
+    }
+  } else {
+    // Already had lunch - skip lunch window
+    if (effectiveStart >= op.lunchStart && effectiveStart < op.lunchEnd) {
+      effectiveStart = op.lunchEnd;
+    }
+  }
+
+  if (effectiveStart + duration > OPERATOR_HARD_STOP) return -1;
+  return effectiveStart;
 }
 
-interface OperatorAssignment {
-  task: PlanningTask;
-  machineStart: number;
-  machineLabel: string;
-  machineTaskId: string;
-  showSimultaneousBadge: boolean;
+/**
+ * Commit an operator to a task: update cursor, worked time, and handle lunch.
+ */
+function commitOperator(op: OperatorState, taskStart: number, duration: number): { opStart: number; opEnd: number } {
+  let effectiveStart = Math.max(op.cursor, taskStart);
+
+  if (!op.hadLunch) {
+    if (effectiveStart < LUNCH_WINDOW_START) {
+      const taskEnd = effectiveStart + duration;
+      if (taskEnd > LUNCH_LATEST_START) {
+        // Must eat lunch first
+        op.lunchStart = LUNCH_WINDOW_START;
+        op.lunchEnd = LUNCH_WINDOW_START + LUNCH_DURATION;
+        op.hadLunch = true;
+        effectiveStart = op.lunchEnd;
+      }
+      // If taskEnd is between 12:00 and 13:00, task runs first, lunch after
+    } else if (effectiveStart >= LUNCH_WINDOW_START) {
+      // In lunch window - eat first
+      const lunchStart = Math.min(Math.max(effectiveStart, LUNCH_WINDOW_START), LUNCH_LATEST_START);
+      op.lunchStart = lunchStart;
+      op.lunchEnd = lunchStart + LUNCH_DURATION;
+      op.hadLunch = true;
+      effectiveStart = op.lunchEnd;
+    }
+  } else {
+    if (effectiveStart >= op.lunchStart && effectiveStart < op.lunchEnd) {
+      effectiveStart = op.lunchEnd;
+    }
+  }
+
+  const opEnd = effectiveStart + duration;
+  op.cursor = opEnd;
+  op.totalWorked += duration;
+
+  return { opStart: effectiveStart, opEnd };
 }
 
-// ── Machine scheduling core ──────────────────────────────
+/**
+ * Force lunch for operator if they haven't had it yet and are past LUNCH_WINDOW_START.
+ */
+function ensureLunch(op: OperatorState) {
+  if (!op.hadLunch && op.cursor >= LUNCH_WINDOW_START) {
+    const lunchStart = Math.min(Math.max(op.cursor, LUNCH_WINDOW_START), LUNCH_LATEST_START);
+    op.lunchStart = lunchStart;
+    op.lunchEnd = lunchStart + LUNCH_DURATION;
+    op.hadLunch = true;
+    if (op.cursor < op.lunchEnd) op.cursor = op.lunchEnd;
+  }
+}
 
+// ── Machine slot tracker ──────────────────────────────
+
+interface MachineSlotTracker {
+  /** Per equipment ID: array of next-available times, one per machine instance */
+  slots: Map<string, number[]>;
+}
+
+function createMachineTracker(equipment: Equipment[], allowEmergency: boolean): MachineSlotTracker {
+  const slots = new Map<string, number[]>();
+  equipment.forEach((eq) => {
+    const count = allowEmergency ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
+    slots.set(eq.id, Array.from({ length: count }, () => DAY_START));
+  });
+  return { slots };
+}
+
+/**
+ * Find the earliest available machine slot for a set of bookings (one phase).
+ * Returns assignments or null.
+ */
+function findEarliestMachineSlot(
+  phaseBookings: MachineBooking[],
+  minStart: number,
+  tracker: MachineSlotTracker,
+  equipmentMap: Map<string, Equipment>,
+  allowEmergency: boolean,
+  hardStop: number,
+): { assignments: { booking: MachineBooking; machineIdx: number; start: number; end: number }[]; phaseStart: number } | null {
+  // Group bookings by equipment
+  const grouped = new Map<string, MachineBooking[]>();
+  phaseBookings.forEach((b) => {
+    const arr = grouped.get(b.equipmentId) ?? [];
+    arr.push(b);
+    grouped.set(b.equipmentId, arr);
+  });
+
+  // For each equipment group, find the N earliest-available slots
+  let phaseStart = minStart;
+  const slotPicks: { equipmentId: string; booking: MachineBooking; machineIdx: number }[] = [];
+
+  for (const [eqId, bookings] of grouped) {
+    const eq = equipmentMap.get(eqId);
+    if (!eq) return null;
+    const slots = tracker.slots.get(eqId);
+    if (!slots) return null;
+    const maxIdx = allowEmergency ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
+    if (maxIdx < bookings.length) return null;
+
+    // Get indices sorted by availability (earliest-free first)
+    const availableIndices = Array.from({ length: maxIdx }, (_, i) => i)
+      .sort((a, b) => (slots[a] ?? DAY_START) - (slots[b] ?? DAY_START));
+
+    for (let bi = 0; bi < bookings.length; bi++) {
+      const idx = availableIndices[bi];
+      const slotAvail = Math.max(slots[idx] ?? DAY_START, minStart);
+      if (slotAvail > phaseStart) phaseStart = slotAvail;
+      slotPicks.push({ equipmentId: eqId, booking: bookings[bi], machineIdx: idx });
+    }
+  }
+
+  if (phaseStart >= hardStop) return null;
+
+  const assignments = slotPicks.map((pick) => ({
+    booking: pick.booking,
+    machineIdx: pick.machineIdx,
+    start: phaseStart,
+    end: phaseStart + pick.booking.duration,
+  }));
+
+  return { assignments, phaseStart };
+}
+
+/**
+ * Build sequential booking phases from a task's bookings.
+ */
 function buildBookingPhases(task: PlanningTask): MachineBooking[][] {
   const sequentialPhases = task.machineBookings.filter((b) => !b.simultaneous).map((b) => [b]);
   const simultaneousPhase = task.machineBookings.filter((b) => b.simultaneous);
   return simultaneousPhase.length > 0 ? [...sequentialPhases, simultaneousPhase] : sequentialPhases;
 }
 
-/**
- * Try to schedule a set of simultaneous bookings starting at minStart.
- * Returns the BEST (earliest-start) assignments or null.
- */
-function evaluatePhase(
-  phaseBookings: MachineBooking[],
-  minStart: number,
-  allowEmergency: boolean,
-  machineHardStop: number,
-  machineSlots: Map<string, number[]>,
-  equipmentMap: Map<string, Equipment>,
-): PhaseAssignment[] | null {
-  const groupedBookings = new Map<string, MachineBooking[]>();
-  phaseBookings.forEach((b) => {
-    const existing = groupedBookings.get(b.equipmentId) ?? [];
-    existing.push(b);
-    groupedBookings.set(b.equipmentId, existing);
-  });
+// ── Joint scheduling result ──────────────────────────────
 
-  const comboEntries = Array.from(groupedBookings.entries()).map(([equipmentId, bookings]) => {
-    const eq = equipmentMap.get(equipmentId);
-    if (!eq) return null;
-    const slotLimit = allowEmergency ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
-    if (slotLimit < bookings.length) return null;
-    const combos = buildCombinations(Array.from({ length: slotLimit }, (_, i) => i), bookings.length);
-    return { equipmentId, bookings, combos };
-  });
-
-  if (comboEntries.some((e) => e === null)) return null;
-  const entries = comboEntries as { equipmentId: string; bookings: MachineBooking[]; combos: number[][] }[];
-
-  // Try all combos and pick the one with earliest start (best parallel distribution)
-  let bestAssignments: PhaseAssignment[] | null = null;
-  let bestStart = Infinity;
-
-  const selections: Array<{ equipmentId: string; bookings: MachineBooking[]; slotIndices: number[] }> = [];
-
-  const search = (entryIndex: number): void => {
-    if (entryIndex >= entries.length) {
-      const rawStart = Math.max(
-        minStart,
-        ...selections.flatMap((sel) =>
-          sel.slotIndices.map((si) => Math.max(machineSlots.get(sel.equipmentId)?.[si] ?? DAY_START, minStart))
-        ),
-      );
-      const phaseStart = Math.max(rawStart, DAY_START);
-
-      // Check if this starts after the hard stop
-      if (machineHardStop < Infinity && phaseStart >= machineHardStop) return;
-
-      const assignments: PhaseAssignment[] = [];
-      for (const sel of selections) {
-        for (let bi = 0; bi < sel.bookings.length; bi++) {
-          const booking = sel.bookings[bi];
-          const machineIdx = sel.slotIndices[bi];
-          const scheduled = createMachineSegments(phaseStart, booking.duration);
-          assignments.push({ booking, machineIdx, scheduled });
-        }
-      }
-
-      if (phaseStart < bestStart) {
-        bestStart = phaseStart;
-        bestAssignments = assignments;
-      }
-      return;
-    }
-
-    const entry = entries[entryIndex];
-    for (const slotIndices of entry.combos) {
-      selections.push({ equipmentId: entry.equipmentId, bookings: entry.bookings, slotIndices });
-      search(entryIndex + 1);
-      selections.pop();
-    }
-  };
-
-  search(0);
-  return bestAssignments;
+interface JointAssignment {
+  task: PlanningTask;
+  machineAssignments: {
+    booking: MachineBooking;
+    machineIdx: number;
+    start: number;
+    end: number;
+  }[];
+  operatorName: string;
+  operatorStart: number;
+  operatorEnd: number;
 }
 
-/**
- * Try to schedule all phases of a task atomically.
- * Returns all phase assignments or null.
- */
-function tryScheduleTask(
-  task: PlanningTask,
-  allowEmergency: boolean,
-  machineHardStop: number,
-  machineSlots: Map<string, number[]>,
-  equipmentMap: Map<string, Equipment>,
-): PhaseAssignment[] | null {
-  const phases = buildBookingPhases(task);
-  if (phases.length === 0) return null;
+// ── Main joint optimizer ──────────────────────────────────
 
-  // Clone machine slots so we can speculatively commit
-  const speculativeSlots = new Map<string, number[]>();
-  machineSlots.forEach((slots, key) => speculativeSlots.set(key, [...slots]));
-
-  const allAssignments: PhaseAssignment[] = [];
-  let phaseCursor = DAY_START;
-
-  for (const phaseBookings of phases) {
-    let assignments: PhaseAssignment[] | null = null;
-
-    if (!allowEmergency) {
-      assignments = evaluatePhase(phaseBookings, phaseCursor, false, machineHardStop, speculativeSlots, equipmentMap);
-    } else {
-      assignments = evaluatePhase(phaseBookings, phaseCursor, false, machineHardStop, speculativeSlots, equipmentMap);
-      if (!assignments) {
-        assignments = evaluatePhase(phaseBookings, phaseCursor, true, machineHardStop, speculativeSlots, equipmentMap);
-      }
-    }
-
-    if (!assignments || assignments.length === 0) return null;
-
-    for (const a of assignments) {
-      speculativeSlots.get(a.booking.equipmentId)![a.machineIdx] = a.scheduled.end;
-    }
-
-    const phaseEnd = Math.max(...assignments.map((a) => a.scheduled.end));
-    phaseCursor = phaseEnd;
-    allAssignments.push(...assignments);
-  }
-
-  return allAssignments;
-}
-
-/**
- * Commit assignments to real machine slots and produce MachineTask objects.
- */
-function commitAssignments(
-  task: PlanningTask,
-  assignments: PhaseAssignment[],
-  machineSlots: Map<string, number[]>,
-  equipmentMap: Map<string, Equipment>,
-  machineTasks: MachineTask[],
-  machineRowsMap: Map<string, GanttRow<MachineTask>>,
-  overflowTasks: string[],
-  emergencyEquipmentNames: Set<string>,
-): MachineTask[] {
-  const taskMachineTasks: MachineTask[] = [];
-
-  for (const { booking, machineIdx, scheduled } of assignments) {
-    const eq = equipmentMap.get(booking.equipmentId);
-    if (!eq) continue;
-
-    machineSlots.get(booking.equipmentId)![machineIdx] = scheduled.end;
-    const isEmergencyMachine = machineIdx >= eq.quantidade;
-    const label = isEmergencyMachine
-      ? `${booking.equipmentName} ${machineIdx + 1} ⚠️`
-      : `${booking.equipmentName} ${machineIdx + 1}`;
-
-    if (isEmergencyMachine) emergencyEquipmentNames.add(eq.nome);
-
-    if (scheduled.segments.some((s) => s.overflow) && !overflowTasks.includes(task.doseLabel)) {
-      overflowTasks.push(task.doseLabel);
-    }
-
-    const mt: MachineTask = {
-      ...task,
-      equipmentId: booking.equipmentId,
-      equipmentName: booking.equipmentName,
-      colorIndex: booking.colorIndex,
-      machineIndex: machineIdx,
-      machineLabel: label,
-      start: scheduled.start,
-      end: scheduled.end,
-      segments: scheduled.segments,
-      isEmergencyMachine,
-      showSimultaneousBadge: Boolean(booking.showSimultaneousBadge),
-      isSequentialPhase: Boolean(booking.isSequentialPhase),
-    };
-
-    taskMachineTasks.push(mt);
-    machineTasks.push(mt);
-    const row = machineRowsMap.get(label) ?? { label, tasks: [] };
-    row.tasks.push(mt);
-    machineRowsMap.set(label, row);
-  }
-
-  return taskMachineTasks;
-}
-
-// ── Main schedule builder ──────────────────────────────────
-
-function buildWithLunch(
+function jointSchedule(
   tasks: PlanningTask[],
   equipment: Equipment[],
   equipmentMap: Map<string, Equipment>,
   operatorNames: string[],
-  targetLunchStart: number,
-  targetLunchEnd: number,
-): Omit<DailyGanttSchedule, 'tasks' | 'lunchStart' | 'lunchEnd'> {
-  // ── PHASE 0: Sort by equipment contention then QD ──
+): {
+  assignments: JointAssignment[];
+  overflowTasks: string[];
+  unscheduledTasks: UnscheduledTask[];
+  emergencyEquipmentNames: Set<string>;
+  staffingWarning: string | null;
+} {
+  // ── Step 1: Feasibility check ──
+  const totalTHomem = tasks.reduce((s, t) => s + t.operatorDuration, 0);
+  const totalOpCapacity = operatorNames.length * OPERATOR_PRODUCTIVE_MINUTES;
+  const staffingWarning = totalTHomem > totalOpCapacity
+    ? `⚠️ Tempo homem necessário (${(totalTHomem / 60).toFixed(1)}h) excede capacidade dos operadores presentes (${(totalOpCapacity / 60).toFixed(1)}h)`
+    : null;
+
+  // ── Step 2: Sort by priority ──
   const equipContention = new Map<string, number>();
   tasks.forEach((t) => {
     for (const b of t.machineBookings) {
@@ -443,119 +413,349 @@ function buildWithLunch(
     return b.machineDuration - a.machineDuration;
   });
 
-  // ── PHASE 1: Schedule with normal equipment only ──
-  const machineSlots = new Map<string, number[]>();
-  equipment.forEach((eq) => {
-    machineSlots.set(eq.id, Array.from({ length: eq.quantidade + eq.quantidadeEmergencia }, () => DAY_START));
-  });
+  // ── Step 3: Joint scheduling ──
+  const operators: OperatorState[] = operatorNames.map((name) => ({
+    name,
+    cursor: DAY_START,
+    totalWorked: 0,
+    hadLunch: false,
+    lunchStart: LUNCH_LATEST_START,
+    lunchEnd: LUNCH_LATEST_START + LUNCH_DURATION,
+  }));
 
-  const machineRowsMap = new Map<string, GanttRow<MachineTask>>();
-  const machineTasks: MachineTask[] = [];
+  const assignments: JointAssignment[] = [];
   const overflowTasks: string[] = [];
+  const unscheduledTasks: UnscheduledTask[] = [];
   const emergencyEquipmentNames = new Set<string>();
-  const taskMachinesMap = new Map<string, MachineTask[]>();
 
-  const phase1Scheduled: PlanningTask[] = [];
-  const phase1Overflow: PlanningTask[] = [];
+  // Try scheduling: first without emergency, then with
+  function tryScheduleAll(allowEmergency: boolean, tasksToSchedule: PlanningTask[]): PlanningTask[] {
+    const tracker = createMachineTracker(equipment, allowEmergency);
 
-  for (const task of sortedTasks) {
-    const assignments = tryScheduleTask(task, false, MACHINE_TARGET_STOP, machineSlots, equipmentMap);
-    if (assignments) {
-      const mts = commitAssignments(task, assignments, machineSlots, equipmentMap, machineTasks, machineRowsMap, overflowTasks, emergencyEquipmentNames);
-      taskMachinesMap.set(task.id, mts);
-      phase1Scheduled.push(task);
-    } else {
-      phase1Overflow.push(task);
+    // Restore machine slots from already-committed assignments
+    for (const a of assignments) {
+      for (const ma of a.machineAssignments) {
+        const slots = tracker.slots.get(ma.booking.equipmentId);
+        if (slots && slots[ma.machineIdx] < ma.end) {
+          slots[ma.machineIdx] = ma.end;
+        }
+      }
     }
-  }
 
-  // ── PHASE 2: Proactive emergency activation ──
-  // Check if any equipment type's last machine task would require operator work past OPERATOR_HARD_STOP
-  // If so, activate emergency machines and redistribute
-  const equipmentEndTimes = new Map<string, number>();
-  machineTasks.forEach((mt) => {
-    const current = equipmentEndTimes.get(mt.equipmentId) ?? 0;
-    if (mt.end > current) equipmentEndTimes.set(mt.equipmentId, mt.end);
-  });
+    const remaining: PlanningTask[] = [];
 
-  // Check if any scheduled task has operator work that would end after OPERATOR_HARD_STOP
-  let needsEmergencyRedistribution = false;
-  const overloadedEquipment = new Set<string>();
+    for (const task of tasksToSchedule) {
+      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment);
+      if (result) {
+        // Commit machine slots
+        for (const ma of result.machineAssignments) {
+          const slots = tracker.slots.get(ma.booking.equipmentId);
+          if (slots) slots[ma.machineIdx] = ma.end;
+        }
+        // Commit operator
+        const op = operators.find((o) => o.name === result.operatorName)!;
+        commitOperator(op, result.operatorStart, task.operatorDuration);
 
-  for (const [eqId, endTime] of equipmentEndTimes) {
-    // If machine ends late, the operator T.Homem at the start of last dose will also be late
-    if (endTime > OPERATOR_HARD_STOP) {
-      overloadedEquipment.add(eqId);
-      needsEmergencyRedistribution = true;
-    }
-  }
-
-  // Also check overflow tasks from Phase 1
-  if (phase1Overflow.length > 0) {
-    needsEmergencyRedistribution = true;
-    phase1Overflow.forEach((t) => {
-      t.machineBookings.forEach((b) => overloadedEquipment.add(b.equipmentId));
-    });
-  }
-
-  if (needsEmergencyRedistribution) {
-    // Check if any overloaded equipment has emergency machines available
-    const hasEmergencyAvailable = Array.from(overloadedEquipment).some((eqId) => {
-      const eq = equipmentMap.get(eqId);
-      return eq && eq.quantidadeEmergencia > 0;
-    });
-
-    if (hasEmergencyAvailable) {
-      // Reset and redo machine scheduling with emergency machines included for overloaded types
-      machineSlots.forEach((slots, key) => slots.fill(DAY_START));
-      machineRowsMap.clear();
-      machineTasks.length = 0;
-      overflowTasks.length = 0;
-      emergencyEquipmentNames.clear();
-      taskMachinesMap.clear();
-
-      const allTasksToSchedule = [...sortedTasks];
-      const finalOverflow: PlanningTask[] = [];
-
-      for (const task of allTasksToSchedule) {
-        // Allow emergency for equipment types that are overloaded
-        const taskNeedsEmergency = task.machineBookings.some((b) => overloadedEquipment.has(b.equipmentId));
-        const assignments = tryScheduleTask(task, taskNeedsEmergency, MACHINE_TARGET_STOP, machineSlots, equipmentMap);
-        if (assignments) {
-          const mts = commitAssignments(task, assignments, machineSlots, equipmentMap, machineTasks, machineRowsMap, overflowTasks, emergencyEquipmentNames);
-          taskMachinesMap.set(task.id, mts);
-        } else {
-          // Last resort: allow overflow
-          const overflowAssignments = tryScheduleTask(task, true, Infinity, machineSlots, equipmentMap);
-          if (overflowAssignments) {
-            const mts = commitAssignments(task, overflowAssignments, machineSlots, equipmentMap, machineTasks, machineRowsMap, overflowTasks, emergencyEquipmentNames);
-            taskMachinesMap.set(task.id, mts);
+        // Track emergency
+        for (const ma of result.machineAssignments) {
+          const eq = equipmentMap.get(ma.booking.equipmentId);
+          if (eq && ma.machineIdx >= eq.quantidade) {
+            emergencyEquipmentNames.add(eq.nome);
           }
-          finalOverflow.push(task);
         }
+
+        assignments.push(result);
+      } else {
+        remaining.push(task);
       }
-    } else {
-      // No emergency machines available, try overflow for Phase 1 overflow tasks
-      for (const task of phase1Overflow) {
-        const assignments = tryScheduleTask(task, true, Infinity, machineSlots, equipmentMap);
-        if (assignments) {
-          const mts = commitAssignments(task, assignments, machineSlots, equipmentMap, machineTasks, machineRowsMap, overflowTasks, emergencyEquipmentNames);
-          taskMachinesMap.set(task.id, mts);
-        }
+    }
+
+    return remaining;
+  }
+
+  // Phase 1: Normal machines only
+  let remaining = tryScheduleAll(false, sortedTasks);
+
+  // Phase 2: Emergency machines for remaining tasks
+  if (remaining.length > 0) {
+    const hasEmergency = equipment.some((eq) => eq.quantidadeEmergencia > 0);
+    if (hasEmergency) {
+      // Check if bottleneck is machines (operators free) or operators (machines free)
+      const opsFree = operators.some((op) => op.totalWorked < OPERATOR_PRODUCTIVE_MINUTES - 10);
+      if (opsFree) {
+        remaining = tryScheduleAll(true, remaining);
       }
     }
   }
+
+  // Mark remaining as unscheduled
+  for (const task of remaining) {
+    const existing = unscheduledTasks.find((u) => u.artigo === task.artigo);
+    if (existing) existing.dosesRemaining += 1;
+    else unscheduledTasks.push({ artigo: task.artigo, dosesRemaining: 1 });
+    overflowTasks.push(task.doseLabel);
+  }
+
+  // ── Step 4: Force lunch for all operators who haven't had it ──
+  for (const op of operators) {
+    ensureLunch(op);
+  }
+
+  return { assignments, overflowTasks, unscheduledTasks, emergencyEquipmentNames, staffingWarning };
+}
+
+/**
+ * Try to find a joint machine+operator slot for a single task.
+ */
+function tryJointSlot(
+  task: PlanningTask,
+  tracker: MachineSlotTracker,
+  operators: OperatorState[],
+  equipmentMap: Map<string, Equipment>,
+  allowEmergency: boolean,
+  equipment: Equipment[],
+): JointAssignment | null {
+  const phases = buildBookingPhases(task);
+  if (phases.length === 0) return null;
+
+  // We need to find a time where both machine(s) and an operator are free
+  // Try incrementally advancing candidateTime
+  let candidateTime = DAY_START;
+  const MAX_ITERATIONS = 200;
+
+  for (let iter = 0; iter < MAX_ITERATIONS && candidateTime < OPERATOR_HARD_STOP; iter++) {
+    // Try to schedule all machine phases atomically starting at candidateTime
+    const machineResult = tryAllPhases(phases, candidateTime, tracker, equipmentMap, allowEmergency);
+    if (!machineResult) {
+      // No machine slot available at all
+      candidateTime += 5;
+      continue;
+    }
+
+    const machineStart = machineResult.overallStart;
+
+    // Check if machine start is past hard stop
+    if (machineStart >= MACHINE_TARGET_STOP) break;
+
+    // Find operator: least-loaded who can start at machineStart for operatorDuration
+    if (task.operatorDuration <= 0) {
+      // No operator needed - commit machine only
+      return {
+        task,
+        machineAssignments: machineResult.allAssignments,
+        operatorName: "",
+        operatorStart: machineStart,
+        operatorEnd: machineStart,
+      };
+    }
+
+    let bestOp: OperatorState | null = null;
+    let bestOpStart = Infinity;
+    let bestOpLoad = Infinity;
+
+    for (const op of operators) {
+      const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration);
+      if (opStart < 0) continue;
+
+      // Operator must be able to start at or after machine start
+      // The T.Homem happens at the START of the machine block
+      if (opStart === machineStart || opStart <= machineStart + 5) {
+        // Perfect alignment
+        if (op.totalWorked < bestOpLoad || (op.totalWorked === bestOpLoad && opStart < bestOpStart)) {
+          bestOp = op;
+          bestOpStart = opStart;
+          bestOpLoad = op.totalWorked;
+        }
+      }
+    }
+
+    if (bestOp) {
+      // Exact or near-exact alignment found
+      const opStart = getOperatorEarliestStart(bestOp, machineStart, task.operatorDuration);
+      return {
+        task,
+        machineAssignments: machineResult.allAssignments,
+        operatorName: bestOp.name,
+        operatorStart: opStart,
+        operatorEnd: opStart + task.operatorDuration,
+      };
+    }
+
+    // No operator available at machineStart - find earliest operator availability
+    let nextOpAvail = Infinity;
+    for (const op of operators) {
+      const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration);
+      if (opStart >= 0 && opStart < nextOpAvail) {
+        nextOpAvail = opStart;
+      }
+    }
+
+    if (nextOpAvail === Infinity) {
+      // No operator can ever do this task - unschedulable
+      return null;
+    }
+
+    // Advance candidate to when an operator is actually available
+    if (nextOpAvail > candidateTime) {
+      candidateTime = nextOpAvail;
+    } else {
+      candidateTime += 5;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Try to schedule all phases of a task atomically on machines.
+ */
+function tryAllPhases(
+  phases: MachineBooking[][],
+  minStart: number,
+  tracker: MachineSlotTracker,
+  equipmentMap: Map<string, Equipment>,
+  allowEmergency: boolean,
+): { allAssignments: { booking: MachineBooking; machineIdx: number; start: number; end: number }[]; overallStart: number } | null {
+  // Clone tracker for speculative scheduling
+  const specSlots = new Map<string, number[]>();
+  tracker.slots.forEach((slots, key) => specSlots.set(key, [...slots]));
+  const specTracker: MachineSlotTracker = { slots: specSlots };
+
+  const allAssignments: { booking: MachineBooking; machineIdx: number; start: number; end: number }[] = [];
+  let phaseCursor = minStart;
+  let overallStart = Infinity;
+
+  for (const phaseBookings of phases) {
+    const result = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, MACHINE_TARGET_STOP);
+    if (!result) {
+      // Try with overflow allowed (past hard stop)
+      const overflowResult = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, Infinity);
+      if (!overflowResult) return null;
+      // Mark as overflow but still return
+      for (const a of overflowResult.assignments) {
+        const slots = specTracker.slots.get(a.booking.equipmentId);
+        if (slots) slots[a.machineIdx] = a.end;
+      }
+      allAssignments.push(...overflowResult.assignments);
+      if (overflowResult.phaseStart < overallStart) overallStart = overflowResult.phaseStart;
+      phaseCursor = Math.max(...overflowResult.assignments.map((a) => a.end));
+      continue;
+    }
+
+    for (const a of result.assignments) {
+      const slots = specTracker.slots.get(a.booking.equipmentId);
+      if (slots) slots[a.machineIdx] = a.end;
+    }
+    allAssignments.push(...result.assignments);
+    if (result.phaseStart < overallStart) overallStart = result.phaseStart;
+    phaseCursor = Math.max(...result.assignments.map((a) => a.end));
+  }
+
+  if (overallStart === Infinity && allAssignments.length > 0) {
+    overallStart = Math.min(...allAssignments.map((a) => a.start));
+  }
+
+  return { allAssignments, overallStart };
+}
+
+// ── Build Gantt structures from joint assignments ──────────
+
+function buildGanttFromAssignments(
+  assignments: JointAssignment[],
+  equipment: Equipment[],
+  equipmentMap: Map<string, Equipment>,
+  operators: string[],
+  operatorStates: OperatorState[],
+  overflowTasks: string[],
+  unscheduledTasks: UnscheduledTask[],
+  emergencyEquipmentNames: Set<string>,
+  staffingWarning: string | null,
+): Omit<DailyGanttSchedule, 'tasks' | 'lunchStart' | 'lunchEnd'> {
+  const machineRowsMap = new Map<string, GanttRow<MachineTask>>();
+  const operatorRowsMap = new Map<string, GanttRow<OperatorTask>>(
+    operators.map((name) => [name, { label: name, tasks: [] }])
+  );
 
   // Ensure all normal equipment rows exist
   equipment.forEach((eq) => {
     for (let i = 0; i < eq.quantidade; i++) {
       const label = `${eq.nome} ${i + 1}`;
-      if (!machineRowsMap.has(label)) {
-        machineRowsMap.set(label, { label, tasks: [] });
-      }
+      machineRowsMap.set(label, { label, tasks: [] });
     }
   });
 
+  for (const assignment of assignments) {
+    const { task, machineAssignments, operatorName, operatorStart, operatorEnd } = assignment;
+
+    // Create machine tasks
+    const machineTasksForThisAssignment: MachineTask[] = [];
+    for (const ma of machineAssignments) {
+      const eq = equipmentMap.get(ma.booking.equipmentId);
+      if (!eq) continue;
+
+      const isEmergencyMachine = ma.machineIdx >= eq.quantidade;
+      const label = isEmergencyMachine
+        ? `${ma.booking.equipmentName} ${ma.machineIdx + 1} ⚠️`
+        : `${ma.booking.equipmentName} ${ma.machineIdx + 1}`;
+
+      const isOverflow = ma.start >= MACHINE_TARGET_STOP;
+      const segments: TimelineSegment[] = [{
+        start: ma.start,
+        end: ma.end,
+        overflow: isOverflow,
+      }];
+
+      const mt: MachineTask = {
+        ...task,
+        equipmentId: ma.booking.equipmentId,
+        equipmentName: ma.booking.equipmentName,
+        colorIndex: ma.booking.colorIndex,
+        machineIndex: ma.machineIdx,
+        machineLabel: label,
+        start: ma.start,
+        end: ma.end,
+        segments,
+        isEmergencyMachine,
+        showSimultaneousBadge: Boolean(ma.booking.showSimultaneousBadge),
+        isSequentialPhase: Boolean(ma.booking.isSequentialPhase),
+      };
+
+      machineTasksForThisAssignment.push(mt);
+
+      if (!machineRowsMap.has(label)) {
+        machineRowsMap.set(label, { label, tasks: [] });
+      }
+      machineRowsMap.get(label)!.tasks.push(mt);
+    }
+
+    // Create operator task
+    if (operatorName && task.operatorDuration > 0) {
+      const opState = operatorStates.find((o) => o.name === operatorName);
+      const opLunchStart = opState?.lunchStart ?? LUNCH_LATEST_START;
+      const opLunchEnd = opState?.lunchEnd ?? LUNCH_LATEST_START + LUNCH_DURATION;
+
+      // Build segments respecting lunch
+      const opSegments = buildOperatorSegments(operatorStart, task.operatorDuration, opLunchStart, opLunchEnd);
+
+      const firstMachine = machineTasksForThisAssignment[0];
+      const machineLabel = machineTasksForThisAssignment.map((mt) => mt.machineLabel).join(" + ");
+
+      const ot: OperatorTask = {
+        ...task,
+        operatorName,
+        start: opSegments.start,
+        end: opSegments.end,
+        segments: opSegments.segments,
+        machineTaskId: firstMachine?.id ?? task.id,
+        machineLabel,
+        showSimultaneousBadge: machineTasksForThisAssignment.some((mt) => mt.showSimultaneousBadge),
+      };
+
+      operatorRowsMap.get(operatorName)?.tasks.push(ot);
+    }
+  }
+
+  // Sort and filter machine rows
   const machineRows = Array.from(machineRowsMap.values())
     .filter((row) => row.label.includes("⚠️") ? row.tasks.length > 0 : true)
     .sort((a, b) => {
@@ -567,178 +767,18 @@ function buildWithLunch(
       return (am?.[1] ?? a.label).localeCompare(bm?.[1] ?? b.label) || Number(am?.[2] ?? 0) - Number(bm?.[2] ?? 0);
     });
 
-  // ── PHASE 3: Operator scheduling with rebalancing ──
-  const allOperatorNames = operatorNames.length > 0 ? operatorNames : [];
-  const operatorRowsMap = new Map<string, GanttRow<OperatorTask>>(
-    allOperatorNames.map((name) => [name, { label: name, tasks: [] }])
-  );
-  const unscheduledTasks: UnscheduledTask[] = [];
-  const operatorLunchBreaks: Record<string, OperatorLunchBreak> = {};
-
-  allOperatorNames.forEach((name) => {
-    operatorLunchBreaks[name] = { start: targetLunchStart, end: targetLunchEnd };
-  });
-
-  const incrementUnscheduled = (artigo: string) => {
-    const existing = unscheduledTasks.find((u) => u.artigo === artigo);
-    if (existing) { existing.dosesRemaining += 1; return; }
-    unscheduledTasks.push({ artigo, dosesRemaining: 1 });
-  };
-
-  if (allOperatorNames.length > 0) {
-    // Build operator task sources from machine schedule
-    const allScheduledTaskIds = new Set(taskMachinesMap.keys());
-    const allScheduledTasks = sortedTasks.filter((t) => allScheduledTaskIds.has(t.id));
-
-    const operatorSources = allScheduledTasks
-      .map((task) => {
-        const relatedMTs = taskMachinesMap.get(task.id) ?? [];
-        if (relatedMTs.length === 0) return null;
-
-        const hasOverflow = relatedMTs.some((mt) => mt.segments.some((s) => s.overflow));
-        const firstStart = Math.min(...relatedMTs.map((mt) => mt.start));
-        const firstPhaseTasks = relatedMTs
-          .filter((mt) => mt.start === firstStart)
-          .sort((a, b) => a.machineLabel.localeCompare(b.machineLabel));
-
-        return {
-          task,
-          start: firstStart,
-          machineLabel: firstPhaseTasks.map((mt) => mt.machineLabel).join(" + "),
-          machineTaskId: firstPhaseTasks[0]?.id ?? task.id,
-          showSimultaneousBadge: firstPhaseTasks.some((mt) => mt.showSimultaneousBadge),
-          hasOverflow,
-        };
-      })
-      .filter((item): item is NonNullable<typeof item> => item !== null)
-      .sort((a, b) => a.start - b.start || a.machineLabel.localeCompare(b.machineLabel));
-
-    // PASS 1: Assign tasks to operators with balanced distribution
-    const operatorAvailability = new Map(allOperatorNames.map((n) => [n, DAY_START]));
-    const operatorTotalMinutes = new Map(allOperatorNames.map((n) => [n, 0]));
-    const assignmentsByOperator = new Map<string, OperatorAssignment[]>(
-      allOperatorNames.map((n) => [n, []])
-    );
-
-    for (const { task, start, machineLabel, machineTaskId, showSimultaneousBadge, hasOverflow } of operatorSources) {
-      if (task.operatorDuration <= 0 || hasOverflow) continue;
-
-      let chosen: string | null = null;
-      let chosenStart = Infinity;
-      let chosenTotal = Infinity;
-
-      for (const name of allOperatorNames) {
-        const avail = operatorAvailability.get(name) ?? DAY_START;
-        const total = operatorTotalMinutes.get(name) ?? 0;
-        const candidateStart = normalizeCursor(Math.max(avail, start), targetLunchStart, targetLunchEnd);
-
-        if (total + task.operatorDuration > AVAILABLE_MACHINE_MINUTES) continue;
-
-        const testSeg = createSegments(candidateStart, task.operatorDuration, targetLunchStart, targetLunchEnd);
-        if (testSeg.segments.some((s) => s.overflow)) continue;
-
-        // Check operator hard stop
-        if (testSeg.end > OPERATOR_HARD_STOP) continue;
-
-        if (chosen === null || total < chosenTotal || (total === chosenTotal && candidateStart < chosenStart)) {
-          chosen = name;
-          chosenStart = candidateStart;
-          chosenTotal = total;
-        }
-      }
-
-      if (chosen === null) {
-        incrementUnscheduled(task.artigo);
-        continue;
-      }
-
-      assignmentsByOperator.get(chosen)!.push({ task, machineStart: start, machineLabel, machineTaskId, showSimultaneousBadge });
-
-      const actualStart = normalizeCursor(Math.max(operatorAvailability.get(chosen) ?? DAY_START, start), targetLunchStart, targetLunchEnd);
-      const scheduled = createSegments(actualStart, task.operatorDuration, targetLunchStart, targetLunchEnd);
-      operatorAvailability.set(chosen, scheduled.end);
-      operatorTotalMinutes.set(chosen, (operatorTotalMinutes.get(chosen) ?? 0) + task.operatorDuration);
-    }
-
-    // PASS 2: Calculate per-operator lunch and re-schedule with individual lunch breaks
-    const LUNCH_LATEST_START = 13 * 60;
-
-    for (const [name, assignments] of assignmentsByOperator) {
-      if (assignments.length === 0) continue;
-
-      assignments.sort((a, b) => a.machineStart - b.machineStart);
-
-      let tempCursor = DAY_START;
-      let opLunchStart = targetLunchStart;
-      const preLunchAssignments: OperatorAssignment[] = [];
-      const postLunchAssignments: OperatorAssignment[] = [];
-
-      for (const a of assignments) {
-        const taskStart = Math.max(tempCursor, a.machineStart);
-        const taskEnd = taskStart + a.task.operatorDuration;
-
-        if (taskEnd > LUNCH_LATEST_START && taskStart < LUNCH_LATEST_START) {
-          postLunchAssignments.push(a);
-        } else if (taskStart >= LUNCH_LATEST_START) {
-          postLunchAssignments.push(a);
-        } else {
-          preLunchAssignments.push(a);
-          if (taskEnd > opLunchStart) opLunchStart = taskEnd;
-          tempCursor = taskEnd;
-        }
-      }
-
-      opLunchStart = Math.min(opLunchStart, LUNCH_LATEST_START);
-      opLunchStart = Math.max(opLunchStart, targetLunchStart);
-      const opLunchEnd = opLunchStart + 60;
-      operatorLunchBreaks[name] = { start: opLunchStart, end: opLunchEnd };
-
-      // Pass 2B: Re-schedule all tasks with individual lunch break
-      let cursor = DAY_START;
-      for (const a of preLunchAssignments) {
-        cursor = Math.max(cursor, a.machineStart);
-        cursor = normalizeCursor(cursor, opLunchStart, opLunchEnd);
-        const scheduled = createSegments(cursor, a.task.operatorDuration, opLunchStart, opLunchEnd);
-
-        operatorRowsMap.get(name)?.tasks.push({
-          ...a.task,
-          operatorName: name,
-          start: scheduled.start,
-          end: scheduled.end,
-          segments: scheduled.segments,
-          machineTaskId: a.machineTaskId,
-          machineLabel: a.machineLabel,
-          showSimultaneousBadge: a.showSimultaneousBadge,
-        });
-        cursor = scheduled.end;
-      }
-
-      cursor = Math.max(cursor, opLunchEnd);
-      for (const a of postLunchAssignments) {
-        cursor = Math.max(cursor, opLunchEnd, a.machineStart);
-        const scheduled = createSegments(cursor, a.task.operatorDuration, opLunchStart, opLunchEnd);
-
-        operatorRowsMap.get(name)?.tasks.push({
-          ...a.task,
-          operatorName: name,
-          start: scheduled.start,
-          end: scheduled.end,
-          segments: scheduled.segments,
-          machineTaskId: a.machineTaskId,
-          machineLabel: a.machineLabel,
-          showSimultaneousBadge: a.showSimultaneousBadge,
-        });
-        cursor = scheduled.end;
-      }
-    }
-  }
-
   const operatorRows = Array.from(operatorRowsMap.values());
 
-  // ── Compute per-machine lunch breaks ──
+  // Per-operator lunch breaks
+  const operatorLunchBreaks: Record<string, OperatorLunchBreak> = {};
+  for (const op of operatorStates) {
+    operatorLunchBreaks[op.name] = { start: op.lunchStart, end: op.lunchEnd };
+  }
+
+  // Machine lunch breaks: overlap of all operators' lunches
   const machineLunchBreaks: Record<string, OperatorLunchBreak> = {};
-  if (allOperatorNames.length > 0 && Object.keys(operatorLunchBreaks).length > 0) {
-    const allBreaks = Object.values(operatorLunchBreaks);
+  if (operatorStates.length > 0) {
+    const allBreaks = operatorStates.map((op) => ({ start: op.lunchStart, end: op.lunchEnd }));
     const overlapStart = Math.max(...allBreaks.map((b) => b.start));
     const overlapEnd = Math.min(...allBreaks.map((b) => b.end));
     if (overlapStart < overlapEnd) {
@@ -748,13 +788,13 @@ function buildWithLunch(
     }
   }
 
+  const allMachineTasks = machineRows.flatMap((r) => r.tasks);
   const latestEnd = Math.max(
     DAY_END,
-    ...machineTasks.map((t) => t.end),
+    ...allMachineTasks.map((t) => t.end),
     ...operatorRows.flatMap((r) => r.tasks.map((t) => t.end))
   );
 
-  // hasOvertime: any operator T.Homem block ends after OPERATOR_HARD_STOP (15:30)
   const hasOvertime = operatorRows.some((row) =>
     row.tasks.some((t) => t.end > OPERATOR_HARD_STOP)
   ) || overflowTasks.length > 0 || unscheduledTasks.length > 0;
@@ -764,13 +804,63 @@ function buildWithLunch(
     operatorRows,
     axisEnd: roundUpToHalfHour(latestEnd),
     usesEmergencyEquipment: emergencyEquipmentNames.size > 0,
-    emergencyEquipmentNames: Array.from(emergencyEquipmentNames).sort((a, b) => a.localeCompare(b)),
+    emergencyEquipmentNames: Array.from(emergencyEquipmentNames).sort(),
     overflowTasks,
     unscheduledTasks,
     hasOvertime,
     operatorLunchBreaks,
     machineLunchBreaks,
+    staffingWarning,
   };
+}
+
+function buildOperatorSegments(start: number, duration: number, lunchStart: number, lunchEnd: number): { start: number; end: number; segments: TimelineSegment[] } {
+  const segments: TimelineSegment[] = [];
+  let cursor = start;
+  let remaining = duration;
+
+  while (remaining > 0) {
+    // Skip lunch
+    if (cursor >= lunchStart && cursor < lunchEnd) {
+      cursor = lunchEnd;
+    }
+
+    let nextBoundary = cursor + remaining;
+    // Don't cross into lunch
+    if (cursor < lunchStart && nextBoundary > lunchStart) {
+      nextBoundary = lunchStart;
+    }
+
+    const isOverflow = cursor >= OPERATOR_HARD_STOP;
+    const segEnd = isOverflow ? cursor + remaining : nextBoundary;
+    segments.push({ start: cursor, end: segEnd, overflow: isOverflow });
+
+    if (isOverflow) break;
+
+    remaining -= (nextBoundary - cursor);
+    cursor = nextBoundary;
+  }
+
+  const end = segments.length > 0 ? segments[segments.length - 1].end : start;
+  return { start, end, segments };
+}
+
+// ── Validation ──────────────────────────────────────────
+
+function validateSchedule(assignments: JointAssignment[]) {
+  for (const a of assignments) {
+    if (a.task.operatorDuration > 0 && !a.operatorName) {
+      console.warn(`[Scheduler] Machine task ${a.task.doseLabel} has no operator assigned`);
+    }
+    if (a.operatorEnd > OPERATOR_HARD_STOP) {
+      console.warn(`[Scheduler] Operator ${a.operatorName} ends at ${formatClock(a.operatorEnd)} (past 15:30) for ${a.task.doseLabel}`);
+    }
+    for (const ma of a.machineAssignments) {
+      if (ma.start >= MACHINE_TARGET_STOP) {
+        console.warn(`[Scheduler] Machine block for ${a.task.doseLabel} starts at ${formatClock(ma.start)} (past 15:40)`);
+      }
+    }
+  }
 }
 
 // ── Public API ──────────────────────────────────────────
@@ -869,8 +959,8 @@ export function buildDailyGanttSchedule({
     return {
       tasks: [], machineRows: [], operatorRows: [], axisEnd: DAY_END,
       usesEmergencyEquipment: false, emergencyEquipmentNames: [], overflowTasks: [],
-      unscheduledTasks: [], lunchStart: 13 * 60, lunchEnd: 14 * 60, hasOvertime: false,
-      operatorLunchBreaks: {}, machineLunchBreaks: {},
+      unscheduledTasks: [], lunchStart: LUNCH_LATEST_START, lunchEnd: LUNCH_LATEST_START + LUNCH_DURATION,
+      hasOvertime: false, operatorLunchBreaks: {}, machineLunchBreaks: {},
     };
   }
 
@@ -881,33 +971,56 @@ export function buildDailyGanttSchedule({
   const tempOpsForDate = tempOperators.filter((t) => t.date === selectedDate);
   const allOpNames = [...operatorNames, ...tempOpsForDate.map((t) => t.nome)];
 
-  // Try 3 lunch target positions
-  const lunchOptions: [number, number][] = [
-    [12 * 60, 13 * 60],
-    [12 * 60 + 30, 13 * 60 + 30],
-    [13 * 60, 14 * 60],
-  ];
+  // Run joint optimizer
+  const result = jointSchedule(tasks, equipment, equipmentMap, allOpNames);
 
-  let bestResult: Omit<DailyGanttSchedule, 'tasks' | 'lunchStart' | 'lunchEnd'> | null = null;
-  let bestScore = Infinity;
-  let bestLunch: [number, number] = [13 * 60, 14 * 60];
+  // Validate
+  validateSchedule(result.assignments);
 
-  for (const [ls, le] of lunchOptions) {
-    const result = buildWithLunch(tasks, equipment, equipmentMap, allOpNames, ls, le);
-    const score = result.overflowTasks.length * 10 + result.unscheduledTasks.reduce((s, u) => s + u.dosesRemaining, 0) * 10;
-    if (score < bestScore) {
-      bestScore = score;
-      bestResult = result;
-      bestLunch = [ls, le];
+  // Build operator states for Gantt
+  const operatorStates: OperatorState[] = allOpNames.map((name) => ({
+    name,
+    cursor: DAY_START,
+    totalWorked: 0,
+    hadLunch: false,
+    lunchStart: LUNCH_LATEST_START,
+    lunchEnd: LUNCH_LATEST_START + LUNCH_DURATION,
+  }));
+
+  // Replay assignments to compute operator states
+  const sortedAssignments = [...result.assignments].sort((a, b) => a.operatorStart - b.operatorStart);
+  for (const a of sortedAssignments) {
+    if (!a.operatorName) continue;
+    const op = operatorStates.find((o) => o.name === a.operatorName);
+    if (op) {
+      commitOperator(op, a.operatorStart, a.task.operatorDuration);
     }
   }
+  for (const op of operatorStates) {
+    ensureLunch(op);
+  }
 
-  const best = bestResult!;
+  const gantt = buildGanttFromAssignments(
+    result.assignments,
+    equipment,
+    equipmentMap,
+    allOpNames,
+    operatorStates,
+    result.overflowTasks,
+    result.unscheduledTasks,
+    result.emergencyEquipmentNames,
+    result.staffingWarning,
+  );
+
+  // Determine lunch times from operator states
+  const lunchStarts = operatorStates.map((o) => o.lunchStart);
+  const lunchStart = lunchStarts.length > 0 ? Math.min(...lunchStarts) : LUNCH_LATEST_START;
+  const lunchEnd = lunchStart + LUNCH_DURATION;
 
   return {
     tasks,
-    ...best,
-    lunchStart: bestLunch[0],
-    lunchEnd: bestLunch[1],
+    ...gantt,
+    lunchStart,
+    lunchEnd,
   };
 }
