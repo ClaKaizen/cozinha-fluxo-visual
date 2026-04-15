@@ -1009,13 +1009,15 @@ export function buildDailyGanttSchedule({
               ? (extra.tempoCicloMaquina1 ?? extra.tempoCicloMaquina)
               : extra.tempoCicloMaquina;
             if (extraDuration <= 0) continue;
+            const isFirstPhase = extra.isFirst ?? false;
             bookings.push({
               equipmentId: extraEq.id,
               equipmentName: extraEq.nome,
               duration: extraDuration,
-              simultaneous: extra.simultaneo,
-              colorIndex: extra.simultaneo ? primaryColorIndex : (equipmentIndex.get(extraEq.id) ?? 0) % 6,
-              isSequentialPhase: !extra.simultaneo,
+              simultaneous: extra.simultaneo && !isFirstPhase,
+              isFirstPhase,
+              colorIndex: (extra.simultaneo && !isFirstPhase) ? primaryColorIndex : (equipmentIndex.get(extraEq.id) ?? 0) % 6,
+              isSequentialPhase: !extra.simultaneo && !isFirstPhase,
             });
           }
         }
