@@ -429,21 +429,18 @@ function jointSchedule(
   });
 
   // ── Build sequencing dependency graph ──
-  // Normalize rules to "mustBeAfter": categoryId → set of categoryIds it must wait for
   const mustBeAfter = new Map<string, Set<string>>();
   for (const rule of sequencingRules) {
     if (rule.relation === 'Depois') {
-      // A Depois B → A must come after B
       if (!mustBeAfter.has(rule.categoryA)) mustBeAfter.set(rule.categoryA, new Set());
       mustBeAfter.get(rule.categoryA)!.add(rule.categoryB);
     } else {
-      // A Antes B → B must come after A
       if (!mustBeAfter.has(rule.categoryB)) mustBeAfter.set(rule.categoryB, new Set());
       mustBeAfter.get(rule.categoryB)!.add(rule.categoryA);
     }
   }
 
-  // Detect circular deps — skip scheduling for circular categories
+  // Detect circular deps
   const circularCategories = new Set<string>();
   {
     const visited = new Set<string>();
@@ -462,8 +459,7 @@ function jointSchedule(
   }
 
   // ── Two-pass topological scheduling ──
-  // Topological sort: schedule categories whose dependencies are already done first
-  const scheduledCategoryEndTimes = new Map<string, number>(); // catId → latest machine end time
+  const scheduledCategoryEndTimes = new Map<string, number>();
 
   function getMinStartForTask(task: PlanningTask): number {
     const deps = mustBeAfter.get(task.categoryId);
@@ -489,7 +485,6 @@ function jointSchedule(
     return true;
   }
 
-  // Separate tasks into ready (no deps or deps already met) and deferred
   const pass1Tasks = sortedTasks.filter(t => !circularCategories.has(t.categoryId) && depsScheduled(t));
   const deferredTasks = sortedTasks.filter(t => !circularCategories.has(t.categoryId) && !depsScheduled(t));
   const circularTasks = sortedTasks.filter(t => circularCategories.has(t.categoryId));
@@ -509,7 +504,38 @@ function jointSchedule(
   const unscheduledTasks: UnscheduledTask[] = [];
   const emergencyEquipmentNames = new Set<string>();
 
-  // Try scheduling with dependency-aware min start times
+  // Track operator coverage per equipment type for grouping:
+  // equipmentId → array of { operatorName, start, end }
+  const equipmentOperatorCoverage = new Map<string, { operatorName: string; start: number; end: number }[]>();
+
+  function findCoveringOperator(equipmentId: string, machineStart: number, machineEnd: number): string | null {
+    const eq = equipmentMap.get(equipmentId);
+    const opsPerGroup = eq?.operatorsPerGroup ?? 1;
+    const coverages = equipmentOperatorCoverage.get(equipmentId) ?? [];
+    // Find coverages that overlap with this machine window
+    const overlapping = coverages.filter(c => c.start < machineEnd && c.end > machineStart);
+    // If we already have enough operators covering this window, reuse one
+    if (overlapping.length >= opsPerGroup) {
+      return overlapping[0].operatorName; // already covered
+    }
+    return null; // need a new operator
+  }
+
+  function addCoverage(equipmentId: string, operatorName: string, start: number, end: number) {
+    if (!equipmentOperatorCoverage.has(equipmentId)) {
+      equipmentOperatorCoverage.set(equipmentId, []);
+    }
+    // Extend existing coverage for same operator if overlapping, else add new
+    const coverages = equipmentOperatorCoverage.get(equipmentId)!;
+    const existing = coverages.find(c => c.operatorName === operatorName && c.start <= end && c.end >= start);
+    if (existing) {
+      existing.start = Math.min(existing.start, start);
+      existing.end = Math.max(existing.end, end);
+    } else {
+      coverages.push({ operatorName, start, end });
+    }
+  }
+
   function tryScheduleAll(allowEmergency: boolean, tasksToSchedule: PlanningTask[]): PlanningTask[] {
     const tracker = createMachineTracker(equipment, allowEmergency);
 
@@ -526,28 +552,51 @@ function jointSchedule(
     const remaining: PlanningTask[] = [];
 
     for (const task of tasksToSchedule) {
-      // Apply sequencing constraint: get minimum start time based on dependencies
       const depMinStart = getMinStartForTask(task);
-      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart);
+
+      // Determine the primary equipment for this task (for operator grouping)
+      const primaryEqId = task.equipmentId;
+      const eq = equipmentMap.get(primaryEqId);
+      const opsPerGroup = eq?.operatorsPerGroup ?? 1;
+
+      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, equipmentOperatorCoverage, equipmentMap);
       if (result) {
         // Commit machine slots
         for (const ma of result.machineAssignments) {
           const slots = tracker.slots.get(ma.booking.equipmentId);
           if (slots) slots[ma.machineIdx] = ma.end;
         }
-        // Commit operator
-        const op = operators.find((o) => o.name === result.operatorName)!;
-        if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
 
-        // Track emergency
-        for (const ma of result.machineAssignments) {
-          const eq = equipmentMap.get(ma.booking.equipmentId);
-          if (eq && ma.machineIdx >= eq.quantidade) {
-            emergencyEquipmentNames.add(eq.nome);
+        // Only commit operator if not covered by existing group
+        if (result.operatorName && task.operatorDuration > 0) {
+          const machineStart = Math.min(...result.machineAssignments.map(ma => ma.start));
+          const machineEnd = Math.max(...result.machineAssignments.map(ma => ma.end));
+          const coveringOp = findCoveringOperator(primaryEqId, machineStart, machineEnd);
+
+          if (coveringOp) {
+            // Operator already covers this equipment group — reuse, don't commit new work
+            result.operatorName = coveringOp;
+            result.operatorStart = machineStart;
+            result.operatorEnd = machineStart; // zero-duration for this dose
+            // Extend coverage
+            addCoverage(primaryEqId, coveringOp, machineStart, machineEnd);
+          } else {
+            // Need new operator assignment
+            const op = operators.find((o) => o.name === result.operatorName)!;
+            if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
+            addCoverage(primaryEqId, result.operatorName, machineStart, machineEnd);
           }
         }
 
-        // Update category end times for dependency tracking
+        // Track emergency
+        for (const ma of result.machineAssignments) {
+          const eqItem = equipmentMap.get(ma.booking.equipmentId);
+          if (eqItem && ma.machineIdx >= eqItem.quantidade) {
+            emergencyEquipmentNames.add(eqItem.nome);
+          }
+        }
+
+        // Update category end times
         const maxMachineEnd = Math.max(...result.machineAssignments.map(ma => ma.end));
         const prevEnd = scheduledCategoryEndTimes.get(task.categoryId) ?? 0;
         scheduledCategoryEndTimes.set(task.categoryId, Math.max(prevEnd, maxMachineEnd));
@@ -569,7 +618,7 @@ function jointSchedule(
     remaining = [...remaining, ...tryScheduleAll(false, deferredTasks)];
   }
 
-  // Schedule circular tasks normally (ignore circular deps)
+  // Schedule circular tasks normally
   if (circularTasks.length > 0) {
     remaining = [...remaining, ...tryScheduleAll(false, circularTasks)];
   }
