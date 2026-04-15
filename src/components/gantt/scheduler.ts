@@ -900,6 +900,8 @@ function buildGanttFromAssignments(
         isSequentialPhase: Boolean(ma.booking.isSequentialPhase),
         isFirstPhase: Boolean(ma.booking.isFirstPhase),
         isLunchSafe: lunchSafeCategories.includes(task.categoryId),
+        isDedicated: Boolean(ma.booking.isDedicated),
+        roleLabel: ma.booking.roleLabel ?? "",
       };
 
       machineTasksForThisAssignment.push(mt);
