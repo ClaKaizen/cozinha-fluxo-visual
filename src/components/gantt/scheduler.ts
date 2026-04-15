@@ -172,24 +172,18 @@ function operatorIsFreeAt(op: OperatorState, start: number, duration: number): b
 
   let effectiveStart = Math.max(op.cursor, start);
 
-  // If we haven't had lunch and the task would overlap or push past lunch constraints
   if (!op.hadLunch) {
-    // If we're in the lunch window and haven't eaten, we must eat first
-    if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < op.lunchEnd) {
-      // Can we eat now (before LUNCH_LATEST_START)?
-      const lunchStart = Math.max(effectiveStart, LUNCH_WINDOW_START);
-      if (lunchStart > LUNCH_LATEST_START) return false; // too late for lunch
-      effectiveStart = lunchStart + LUNCH_DURATION;
-    }
-    // If the task would end past LUNCH_LATEST_START and we haven't eaten
-    if (effectiveStart + duration > LUNCH_LATEST_START && effectiveStart < LUNCH_WINDOW_START) {
-      // Task runs past 13:00 but starts before 12:00 - that's fine, lunch after
-      // But the task end must not prevent lunch by 13:00
-      // Actually: if task ends after LUNCH_LATEST_START, operator must eat first
-      // Only if task would push lunch start past 13:00
+    if (effectiveStart < LUNCH_WINDOW_START) {
+      const taskEnd = effectiveStart + duration;
+      if (taskEnd > LUNCH_LATEST_START) {
+        // Task would end after 13:00 — must eat lunch first at 12:00
+        effectiveStart = LUNCH_WINDOW_START + LUNCH_DURATION;
+      }
+    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < LUNCH_LATEST_START + LUNCH_DURATION) {
+      const lunchStart = Math.min(Math.max(op.cursor, LUNCH_WINDOW_START), LUNCH_LATEST_START);
+      effectiveStart = Math.max(effectiveStart, lunchStart + LUNCH_DURATION);
     }
   } else {
-    // Already had lunch - skip lunch window
     if (effectiveStart >= op.lunchStart && effectiveStart < op.lunchEnd) {
       effectiveStart = op.lunchEnd;
     }
