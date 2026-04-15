@@ -46,7 +46,6 @@ interface AppState {
 
   addLunchSafeCategory: (categoryId: string) => void;
   removeLunchSafeCategory: (categoryId: string) => void;
-  deleteSequencingRule: (id: string) => void;
 
   getProductionForDate: (date: string) => ProductionEntry[];
   getOperatorsForDate: (date: string) => { operator: Operator; code: ShiftCode; absent: boolean; hours: number }[];
