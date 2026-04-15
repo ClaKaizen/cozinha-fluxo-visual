@@ -63,9 +63,9 @@ export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
       equipment: [
-        { id: 'eq1', nome: 'Basculante', quantidade: 4, quantidadeEmergencia: 0 },
-        { id: 'eq2', nome: 'Forno', quantidade: 3, quantidadeEmergencia: 0 },
-        { id: 'eq3', nome: 'Panela', quantidade: 2, quantidadeEmergencia: 0 },
+        { id: 'eq1', nome: 'Basculante', quantidade: 4, quantidadeEmergencia: 0, operatorsPerGroup: 1 },
+        { id: 'eq2', nome: 'Forno', quantidade: 3, quantidadeEmergencia: 0, operatorsPerGroup: 1 },
+        { id: 'eq3', nome: 'Panela', quantidade: 2, quantidadeEmergencia: 0, operatorsPerGroup: 1 },
       ],
       categories: [
         { id: 'cat1', nome: 'Molho Base Bechamel', equipamentoId: 'eq3', tempoCicloHomem: 15, tempoCicloMaquina: 45, unidade: 'kg' },
@@ -139,13 +139,21 @@ export const useStore = create<AppState>()(
         const ops = state.getOperatorsForDate(date);
         const temps = state.tempOperators.filter((t) => t.date === date);
 
-        // Carga: T. Homem only with 20% inefficiency
+        // Carga: T. Homem with operator grouping (Op./Grupo)
+        // Group production by equipment type — for each batch of simultaneous machines,
+        // only operatorsPerGroup operators' worth of T.Homem counts
         let cargaMinutes = 0;
+        const prodByEquipment = new Map<string, { tHomemTotal: number; doses: number }>();
         prod.forEach((p) => {
           const cat = state.categories.find((c) => c.id === p.categoriaId);
           if (cat) {
             const tHomem1 = cat.tempoCicloHomem1 ?? cat.tempoCicloHomem;
-            cargaMinutes += tHomem1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloHomem : 0);
+            const totalTHomem = tHomem1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloHomem : 0);
+            const eq = state.equipment.find((e) => e.id === cat.equipamentoId);
+            const opsPerGroup = eq?.operatorsPerGroup ?? 1;
+            // With grouping: effective T.Homem = T.Homem per dose × opsPerGroup (not × machines)
+            // Since doses run sequentially per machine, and opsPerGroup operators cover all machines:
+            cargaMinutes += totalTHomem * opsPerGroup / Math.max(1, Math.min(p.quantidade, eq?.quantidade ?? 1));
           }
         });
         const cargaTeorica = cargaMinutes / 60;
