@@ -559,7 +559,7 @@ function jointSchedule(
       const eq = equipmentMap.get(primaryEqId);
       const opsPerGroup = eq?.operatorsPerGroup ?? 1;
 
-      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, equipmentOperatorCoverage, equipmentMap);
+      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart);
       if (result) {
         // Commit machine slots
         for (const ma of result.machineAssignments) {
