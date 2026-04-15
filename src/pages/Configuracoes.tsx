@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Plus, Trash2, Edit2, Save, X, Wrench, Tag, User, Cog, AlertTriangle } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Plus, Trash2, Edit2, Save, X, Wrench, Tag, User, Cog, AlertTriangle, ListOrdered } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import type { CategoryEquipmentEntry } from "@/store/types";
+import type { CategoryEquipmentEntry, SequencingRule } from "@/store/types";
 
 const EQUIPMENT_COLORS = [
   "hsl(45, 90%, 60%)", "hsl(210, 60%, 55%)", "hsl(340, 60%, 55%)",
@@ -387,6 +387,176 @@ export default function Configuracoes() {
           )}
         </CardContent>
       </Card>
+
+      {/* Sequenciamento */}
+      <SequenciamentoSection />
     </div>
+  );
+}
+
+/* ── Sequenciamento Section ─────────────────────────────── */
+
+function SequenciamentoSection() {
+  const store = useStore();
+  const categories = store.categories;
+  const rules = store.sequencingRules;
+
+  const [form, setForm] = useState<{ categoryA: string; relation: 'Antes' | 'Depois'; categoryB: string }>({
+    categoryA: '', relation: 'Depois', categoryB: '',
+  });
+  const [editId, setEditId] = useState<string | null>(null);
+
+  const catName = (id: string) => categories.find(c => c.id === id)?.nome ?? '?';
+
+  // Circular dependency detection
+  const circularWarnings = useMemo(() => {
+    const warnings: string[] = [];
+    // Build adjacency: A must be after B → edge B→A
+    const adj = new Map<string, Set<string>>();
+    for (const r of rules) {
+      if (r.relation === 'Depois') {
+        // A after B → B must come first
+        if (!adj.has(r.categoryB)) adj.set(r.categoryB, new Set());
+        adj.get(r.categoryB)!.add(r.categoryA);
+      } else {
+        // A before B → A must come first
+        if (!adj.has(r.categoryA)) adj.set(r.categoryA, new Set());
+        adj.get(r.categoryA)!.add(r.categoryB);
+      }
+    }
+    // Detect cycles via DFS
+    const visited = new Set<string>();
+    const stack = new Set<string>();
+    function dfs(node: string, path: string[]): boolean {
+      if (stack.has(node)) {
+        const cycleStart = path.indexOf(node);
+        const cycle = path.slice(cycleStart).map(id => catName(id));
+        warnings.push(`Regra circular detectada: ${cycle.join(' → ')} → ${catName(node)}`);
+        return true;
+      }
+      if (visited.has(node)) return false;
+      visited.add(node);
+      stack.add(node);
+      for (const next of adj.get(node) ?? []) {
+        if (dfs(next, [...path, node])) return true;
+      }
+      stack.delete(node);
+      return false;
+    }
+    for (const node of adj.keys()) {
+      if (!visited.has(node)) dfs(node, []);
+    }
+    return warnings;
+  }, [rules, categories]);
+
+  const handleAdd = () => {
+    if (!form.categoryA || !form.categoryB || form.categoryA === form.categoryB) return;
+    // Check duplicate
+    const dup = rules.some(r =>
+      r.categoryA === form.categoryA && r.relation === form.relation && r.categoryB === form.categoryB
+    );
+    if (dup) return;
+
+    if (editId) {
+      store.updateSequencingRule(editId, form);
+      setEditId(null);
+    } else {
+      store.addSequencingRule(form);
+    }
+    setForm({ categoryA: '', relation: 'Depois', categoryB: '' });
+  };
+
+  const cellCls = "px-2 py-1";
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-3 rounded-t-lg" style={{ backgroundColor: "hsl(215, 25%, 34%)" }}>
+        <ListOrdered className="h-4 w-4 text-white" />
+        <span className="text-white font-display font-semibold text-base">Sequenciamento</span>
+      </div>
+      <CardContent className="pt-4">
+        <p className="text-xs text-muted-foreground mb-3">
+          Ex: Molho carne → Depois → Novilho significa que o Molho carne é sempre planeado após o Novilho.
+        </p>
+
+        {circularWarnings.length > 0 && (
+          <div className="mb-3 p-2 rounded border border-destructive/40 bg-destructive/10">
+            {circularWarnings.map((w, i) => (
+              <div key={i} className="flex items-center gap-1 text-xs text-destructive">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                <span>{w}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-xs text-muted-foreground">
+              <th className={`text-left font-medium ${cellCls}`}>Esta categoria...</th>
+              <th className={`text-center font-medium ${cellCls}`}>deve ser feita</th>
+              <th className={`text-left font-medium ${cellCls}`}>em relação a...</th>
+              <th className={`${cellCls} w-[80px]`}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rules.map((rule) => (
+              <tr key={rule.id} className="border-b last:border-b-0 hover:bg-muted/30">
+                <td className={`${cellCls} font-medium`}>{catName(rule.categoryA)}</td>
+                <td className={`${cellCls} text-center`}>
+                  <Badge variant="outline" className="text-[10px]">{rule.relation}</Badge>
+                </td>
+                <td className={`${cellCls} font-medium`}>{catName(rule.categoryB)}</td>
+                <td className={`${cellCls} text-right`}>
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => {
+                    setEditId(rule.id);
+                    setForm({ categoryA: rule.categoryA, relation: rule.relation, categoryB: rule.categoryB });
+                  }}>
+                    <Edit2 className="h-3 w-3" />
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-1" onClick={() => store.deleteSequencingRule(rule.id)}>
+                    <Trash2 className="h-3 w-3 text-destructive" />
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="flex gap-2 mt-3 items-center flex-wrap">
+          <Select value={form.categoryA} onValueChange={(v) => setForm({ ...form, categoryA: v })}>
+            <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="Categoria..." /></SelectTrigger>
+            <SelectContent>
+              {categories.filter(c => c.id !== form.categoryB).map(c => (
+                <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={form.relation} onValueChange={(v) => setForm({ ...form, relation: v as 'Antes' | 'Depois' })}>
+            <SelectTrigger className="h-8 text-xs w-[100px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Antes">Antes</SelectItem>
+              <SelectItem value="Depois">Depois</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={form.categoryB} onValueChange={(v) => setForm({ ...form, categoryB: v })}>
+            <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="Categoria..." /></SelectTrigger>
+            <SelectContent>
+              {categories.filter(c => c.id !== form.categoryA).map(c => (
+                <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button onClick={handleAdd} size="sm" className="h-8 text-xs" style={{ backgroundColor: '#FFD966', color: '#44546A' }}>
+            <Plus className="h-3 w-3 mr-1" /> {editId ? 'Guardar' : 'Adicionar Regra'}
+          </Button>
+          {editId && (
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => { setEditId(null); setForm({ categoryA: '', relation: 'Depois', categoryB: '' }); }}>
+              <X className="h-3 w-3 mr-1" /> Cancelar
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
