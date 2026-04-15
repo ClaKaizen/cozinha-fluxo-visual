@@ -696,7 +696,7 @@ function tryJointSlot(
 
   for (let iter = 0; iter < MAX_ITERATIONS && candidateTime < OPERATOR_HARD_STOP; iter++) {
     // Try to schedule all machine phases atomically starting at candidateTime
-    const machineResult = tryAllPhases(phases, candidateTime, tracker, equipmentMap, allowEmergency);
+    const machineResult = tryAllPhases(phases, candidateTime, tracker, equipmentMap, allowEmergency, task.categoryId);
     if (!machineResult) {
       // No machine slot available at all
       candidateTime += 5;
