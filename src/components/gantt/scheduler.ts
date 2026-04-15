@@ -1145,6 +1145,8 @@ export function buildDailyGanttSchedule({
               isFirstPhase,
               colorIndex: (extra.simultaneo && !isFirstPhase) ? primaryColorIndex : (equipmentIndex.get(extraEq.id) ?? 0) % 6,
               isSequentialPhase: !extra.simultaneo && !isFirstPhase,
+              isDedicated: extra.isDedicated ?? false,
+              roleLabel: extra.roleLabel ?? "",
             });
           }
         }
