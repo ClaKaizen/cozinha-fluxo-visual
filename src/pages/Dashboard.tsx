@@ -82,12 +82,25 @@ export default function Dashboard() {
     }
   };
 
-  const pessoasNecessarias = Math.ceil(stats.cargaDoDia / 8);
-  const pessoasNecessariasTeo = Math.ceil(stats.cargaTeorica / 8);
+  // Iterative feasibility-based staffing calculation
+  const staffing = useMemo(
+    () => calculateMinimumStaffing({
+      dateStr: normalizeDateKey(dateStr),
+      production: store.production,
+      categories: store.categories,
+      equipment: store.equipment,
+      operatorsForDate: operators,
+      tempOperators: store.tempOperators,
+      sequencingRules: store.sequencingRules,
+      lunchSafeCategories: store.lunchSafeCategories,
+    }),
+    [dateStr, store.production, store.categories, store.equipment, operators, store.tempOperators, store.sequencingRules, store.lunchSafeCategories]
+  );
+
+  const pessoasNecessarias = staffing.pessoasNecessarias;
   const delta = stats.pessoasPresentes - pessoasNecessarias;
-  const deltaTeo = stats.pessoasPresentes - pessoasNecessariasTeo;
   const dimensionamentoOk = delta >= 0;
-  const dimensionamentoTeoOk = deltaTeo >= 0;
+  const staffingInfeasible = !staffing.feasible;
 
   // Group production by equipment
   const enrichedProd = production.map((p) => {
