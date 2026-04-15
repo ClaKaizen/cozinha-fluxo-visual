@@ -558,7 +558,7 @@ function jointSchedule(
       // Get preferred operator for Op./Grupo enforcement
       const preferredOp = getPreferredOperator(primaryEqId);
 
-      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp);
+      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp, lunchSafeCategories);
       if (result) {
         // Commit machine slots
         for (const ma of result.machineAssignments) {
@@ -648,7 +648,9 @@ function tryJointSlot(
   equipment: Equipment[],
   minStartOverride: number = DAY_START,
   preferredOperator?: string,
+  lunchSafeCategoryIds: string[] = [],
 ): JointAssignment | null {
+  const isLunchSafe = lunchSafeCategoryIds.includes(task.categoryId);
   const phases = buildBookingPhases(task);
   if (phases.length === 0) return null;
 
