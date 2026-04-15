@@ -134,18 +134,17 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                         const left = toPercent(seg.start);
                         const width = ((seg.end - seg.start) / totalSpan) * 100;
                         const widthPx = (width / 100) * chartWidth;
-                        const minWidthPx = 36;
-                        const effectiveWidthPx = Math.max(widthPx, minWidthPx);
-                        const showTime = effectiveWidthPx > 100;
+                        const showLabel = widthPx > 30;
+                        const showTime = widthPx > 60;
                         const isOverflow = seg.overflow;
+                        const labelPrefix = isOverflow ? `⚠ ` : `${(task as unknown as MachineTask).isFirstPhase ? "1→ " : (task as unknown as MachineTask).isSequentialPhase ? "→ " : task.showSimultaneousBadge ? "⊗ " : ""}${(task as unknown as MachineTask).isLunchSafe && rowLunch && seg.end > rowLunch.start && seg.start < rowLunch.end ? "🍽 " : ""}`;
                         return (
                           <div
                             key={`${task.id}-${si}`}
-                            className={`absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-1 text-[10px] font-semibold text-foreground shadow-sm z-10 ${isOverflow ? "border-dashed border-red-500 bg-red-100/60 dark:bg-red-900/30" : ""}`}
+                            className={`absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-0.5 text-[10px] font-semibold text-foreground shadow-sm z-10 ${isOverflow ? "border-dashed border-red-500 bg-red-100/60 dark:bg-red-900/30" : ""}`}
                             style={{
                               left: `${left}%`,
-                              width: effectiveWidthPx > widthPx ? `${effectiveWidthPx}px` : `${width}%`,
-                              minWidth: `${minWidthPx}px`,
+                              width: `${width}%`,
                               ...(isOverflow ? {
                                 backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(239,68,68,0.15) 4px, rgba(239,68,68,0.15) 8px)',
                               } : {
@@ -156,7 +155,9 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                             }}
                             title={`${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`}
                           >
-                            <span className="truncate leading-tight">{isOverflow ? `⚠ ${task.artigo}` : `${(task as unknown as MachineTask).isFirstPhase ? "1→ " : (task as unknown as MachineTask).isSequentialPhase ? "→ " : task.showSimultaneousBadge ? "⊗ " : ""}${(task as unknown as MachineTask).isLunchSafe && rowLunch && seg.end > rowLunch.start && seg.start < rowLunch.end ? "🍽 " : ""}${task.artigo}`}</span>
+                            {showLabel && (
+                              <span className="truncate leading-tight">{labelPrefix}{task.artigo}</span>
+                            )}
                             {showTime && (
                               <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">
                                 {formatClock(seg.start)}–{formatClock(seg.end)}
