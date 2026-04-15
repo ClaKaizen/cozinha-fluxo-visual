@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
   Equipment, Category, ProductionEntry, Operator, ScheduleEntry,
-  DayAbsence, TempOperator, ShiftCode, SHIFT_HOURS, WORKING_CODES, BREAK_COEFFICIENT, INEFFICIENCY_FACTOR
+  DayAbsence, TempOperator, ShiftCode, SHIFT_HOURS, WORKING_CODES, BREAK_COEFFICIENT, INEFFICIENCY_FACTOR,
+  SequencingRule,
 } from './types';
 import { AVAILABLE_MACHINE_MINUTES, buildDailyGanttSchedule, normalizeDateKey } from '@/components/gantt/scheduler';
 
@@ -14,6 +15,7 @@ interface AppState {
   schedule: ScheduleEntry[];
   absences: DayAbsence[];
   tempOperators: TempOperator[];
+  sequencingRules: SequencingRule[];
 
   addEquipment: (e: Omit<Equipment, 'id'>) => void;
   updateEquipment: (id: string, e: Partial<Equipment>) => void;
@@ -36,6 +38,10 @@ interface AppState {
   removeAbsence: (operatorId: string, date: string) => void;
   addTempOperator: (t: Omit<TempOperator, 'id'>) => void;
   removeTempOperator: (id: string) => void;
+
+  addSequencingRule: (rule: Omit<SequencingRule, 'id'>) => void;
+  updateSequencingRule: (id: string, rule: Partial<SequencingRule>) => void;
+  deleteSequencingRule: (id: string) => void;
 
   getProductionForDate: (date: string) => ProductionEntry[];
   getOperatorsForDate: (date: string) => { operator: Operator; code: ShiftCode; absent: boolean; hours: number }[];
@@ -71,6 +77,7 @@ export const useStore = create<AppState>()(
       schedule: [],
       absences: [],
       tempOperators: [],
+      sequencingRules: [],
 
       addEquipment: (e) => set((s) => ({ equipment: [...s.equipment, { ...e, id: uid() }] })),
       updateEquipment: (id, e) => set((s) => ({ equipment: s.equipment.map((eq) => eq.id === id ? { ...eq, ...e } : eq) })),
@@ -108,6 +115,10 @@ export const useStore = create<AppState>()(
       })),
       addTempOperator: (t) => set((s) => ({ tempOperators: [...s.tempOperators, { ...t, id: uid() }] })),
       removeTempOperator: (id) => set((s) => ({ tempOperators: s.tempOperators.filter((t) => t.id !== id) })),
+
+      addSequencingRule: (rule) => set((s) => ({ sequencingRules: [...s.sequencingRules, { ...rule, id: uid() }] })),
+      updateSequencingRule: (id, rule) => set((s) => ({ sequencingRules: s.sequencingRules.map((r) => r.id === id ? { ...r, ...rule } : r) })),
+      deleteSequencingRule: (id) => set((s) => ({ sequencingRules: s.sequencingRules.filter((r) => r.id !== id) })),
 
       getProductionForDate: (date) => get().production.filter((p) => p.date === date),
 
