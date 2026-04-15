@@ -1139,10 +1139,10 @@ export function buildDailyGanttSchedule({
     lunchEnd: LUNCH_LATEST_START + LUNCH_DURATION,
   }));
 
-  // Replay assignments to compute operator states
+  // Replay assignments to compute operator states (skip grouped/zero-duration)
   const sortedAssignments = [...result.assignments].sort((a, b) => a.operatorStart - b.operatorStart);
   for (const a of sortedAssignments) {
-    if (!a.operatorName) continue;
+    if (!a.operatorName || a.operatorStart >= a.operatorEnd) continue;
     const op = operatorStates.find((o) => o.name === a.operatorName);
     if (op) {
       commitOperator(op, a.operatorStart, a.task.operatorDuration);
