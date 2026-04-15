@@ -3,6 +3,7 @@ import {
   Equipment,
   Operator,
   ProductionEntry,
+  SequencingRule,
   ShiftCode,
   TempOperator,
   WORKING_CODES,
@@ -43,6 +44,7 @@ export interface PlanningTask {
   equipmentId: string;
   equipmentName: string;
   categoryName: string;
+  categoryId: string;
   machineDuration: number;
   operatorDuration: number;
   colorIndex: number;
@@ -117,6 +119,7 @@ interface BuildScheduleInput {
   equipment: Equipment[];
   operatorsForDate: OperatorPresence[];
   tempOperators: TempOperator[];
+  sequencingRules?: SequencingRule[];
 }
 
 // ── Helpers ──────────────────────────────────────────────
@@ -371,6 +374,7 @@ function jointSchedule(
   equipment: Equipment[],
   equipmentMap: Map<string, Equipment>,
   operatorNames: string[],
+  sequencingRules: SequencingRule[] = [],
 ): {
   assignments: JointAssignment[];
   overflowTasks: string[];
@@ -413,6 +417,72 @@ function jointSchedule(
     return b.machineDuration - a.machineDuration;
   });
 
+  // ── Build sequencing dependency graph ──
+  // Normalize rules to "mustBeAfter": categoryId → set of categoryIds it must wait for
+  const mustBeAfter = new Map<string, Set<string>>();
+  for (const rule of sequencingRules) {
+    if (rule.relation === 'Depois') {
+      // A Depois B → A must come after B
+      if (!mustBeAfter.has(rule.categoryA)) mustBeAfter.set(rule.categoryA, new Set());
+      mustBeAfter.get(rule.categoryA)!.add(rule.categoryB);
+    } else {
+      // A Antes B → B must come after A
+      if (!mustBeAfter.has(rule.categoryB)) mustBeAfter.set(rule.categoryB, new Set());
+      mustBeAfter.get(rule.categoryB)!.add(rule.categoryA);
+    }
+  }
+
+  // Detect circular deps — skip scheduling for circular categories
+  const circularCategories = new Set<string>();
+  {
+    const visited = new Set<string>();
+    const stack = new Set<string>();
+    function detectCycle(node: string): boolean {
+      if (stack.has(node)) { circularCategories.add(node); return true; }
+      if (visited.has(node)) return false;
+      visited.add(node); stack.add(node);
+      for (const dep of mustBeAfter.get(node) ?? []) {
+        if (detectCycle(dep)) { circularCategories.add(node); return true; }
+      }
+      stack.delete(node);
+      return false;
+    }
+    for (const catId of mustBeAfter.keys()) detectCycle(catId);
+  }
+
+  // ── Two-pass topological scheduling ──
+  // Topological sort: schedule categories whose dependencies are already done first
+  const scheduledCategoryEndTimes = new Map<string, number>(); // catId → latest machine end time
+
+  function getMinStartForTask(task: PlanningTask): number {
+    const deps = mustBeAfter.get(task.categoryId);
+    if (!deps) return DAY_START;
+    let minStart = DAY_START;
+    for (const depCatId of deps) {
+      if (circularCategories.has(depCatId)) continue;
+      const endTime = scheduledCategoryEndTimes.get(depCatId);
+      if (endTime !== undefined) {
+        minStart = Math.max(minStart, endTime);
+      }
+    }
+    return minStart;
+  }
+
+  function depsScheduled(task: PlanningTask): boolean {
+    const deps = mustBeAfter.get(task.categoryId);
+    if (!deps) return true;
+    for (const depCatId of deps) {
+      if (circularCategories.has(depCatId)) continue;
+      if (!scheduledCategoryEndTimes.has(depCatId)) return false;
+    }
+    return true;
+  }
+
+  // Separate tasks into ready (no deps or deps already met) and deferred
+  const pass1Tasks = sortedTasks.filter(t => !circularCategories.has(t.categoryId) && depsScheduled(t));
+  const deferredTasks = sortedTasks.filter(t => !circularCategories.has(t.categoryId) && !depsScheduled(t));
+  const circularTasks = sortedTasks.filter(t => circularCategories.has(t.categoryId));
+
   // ── Step 3: Joint scheduling ──
   const operators: OperatorState[] = operatorNames.map((name) => ({
     name,
@@ -428,7 +498,7 @@ function jointSchedule(
   const unscheduledTasks: UnscheduledTask[] = [];
   const emergencyEquipmentNames = new Set<string>();
 
-  // Try scheduling: first without emergency, then with
+  // Try scheduling with dependency-aware min start times
   function tryScheduleAll(allowEmergency: boolean, tasksToSchedule: PlanningTask[]): PlanningTask[] {
     const tracker = createMachineTracker(equipment, allowEmergency);
 
@@ -445,7 +515,9 @@ function jointSchedule(
     const remaining: PlanningTask[] = [];
 
     for (const task of tasksToSchedule) {
-      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment);
+      // Apply sequencing constraint: get minimum start time based on dependencies
+      const depMinStart = getMinStartForTask(task);
+      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart);
       if (result) {
         // Commit machine slots
         for (const ma of result.machineAssignments) {
@@ -454,7 +526,7 @@ function jointSchedule(
         }
         // Commit operator
         const op = operators.find((o) => o.name === result.operatorName)!;
-        commitOperator(op, result.operatorStart, task.operatorDuration);
+        if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
 
         // Track emergency
         for (const ma of result.machineAssignments) {
@@ -463,6 +535,11 @@ function jointSchedule(
             emergencyEquipmentNames.add(eq.nome);
           }
         }
+
+        // Update category end times for dependency tracking
+        const maxMachineEnd = Math.max(...result.machineAssignments.map(ma => ma.end));
+        const prevEnd = scheduledCategoryEndTimes.get(task.categoryId) ?? 0;
+        scheduledCategoryEndTimes.set(task.categoryId, Math.max(prevEnd, maxMachineEnd));
 
         assignments.push(result);
       } else {
@@ -473,14 +550,23 @@ function jointSchedule(
     return remaining;
   }
 
-  // Phase 1: Normal machines only
-  let remaining = tryScheduleAll(false, sortedTasks);
+  // Pass 1: Schedule tasks with no unmet dependencies (normal machines)
+  let remaining = tryScheduleAll(false, pass1Tasks);
 
-  // Phase 2: Emergency machines for remaining tasks
+  // Pass 2: Schedule deferred tasks (dependencies now met)
+  if (deferredTasks.length > 0) {
+    remaining = [...remaining, ...tryScheduleAll(false, deferredTasks)];
+  }
+
+  // Schedule circular tasks normally (ignore circular deps)
+  if (circularTasks.length > 0) {
+    remaining = [...remaining, ...tryScheduleAll(false, circularTasks)];
+  }
+
+  // Phase with emergency machines for remaining tasks
   if (remaining.length > 0) {
     const hasEmergency = equipment.some((eq) => eq.quantidadeEmergencia > 0);
     if (hasEmergency) {
-      // Check if bottleneck is machines (operators free) or operators (machines free)
       const opsFree = operators.some((op) => op.totalWorked < OPERATOR_PRODUCTIVE_MINUTES - 10);
       if (opsFree) {
         remaining = tryScheduleAll(true, remaining);
@@ -514,13 +600,14 @@ function tryJointSlot(
   equipmentMap: Map<string, Equipment>,
   allowEmergency: boolean,
   equipment: Equipment[],
+  minStartOverride: number = DAY_START,
 ): JointAssignment | null {
   const phases = buildBookingPhases(task);
   if (phases.length === 0) return null;
 
   // We need to find a time where both machine(s) and an operator are free
   // Try incrementally advancing candidateTime
-  let candidateTime = DAY_START;
+  let candidateTime = Math.max(DAY_START, minStartOverride);
   const MAX_ITERATIONS = 200;
 
   for (let iter = 0; iter < MAX_ITERATIONS && candidateTime < OPERATOR_HARD_STOP; iter++) {
@@ -872,6 +959,7 @@ export function buildDailyGanttSchedule({
   equipment,
   operatorsForDate,
   tempOperators,
+  sequencingRules,
 }: BuildScheduleInput): DailyGanttSchedule {
   const selectedDate = normalizeDateKey(dateStr);
   const equipmentIndex = new Map(equipment.map((item, idx) => [item.id, idx]));
@@ -940,6 +1028,7 @@ export function buildDailyGanttSchedule({
           equipmentId: machine.id,
           equipmentName: machine.nome,
           categoryName: cat.nome,
+          categoryId: cat.id,
           machineDuration: totalMachineDuration > 0 ? totalMachineDuration : tMaqPrimary,
           operatorDuration: tHomem,
           colorIndex: primaryColorIndex,
@@ -972,7 +1061,7 @@ export function buildDailyGanttSchedule({
   const allOpNames = [...operatorNames, ...tempOpsForDate.map((t) => t.nome)];
 
   // Run joint optimizer
-  const result = jointSchedule(tasks, equipment, equipmentMap, allOpNames);
+  const result = jointSchedule(tasks, equipment, equipmentMap, allOpNames, sequencingRules ?? []);
 
   // Validate
   validateSchedule(result.assignments);

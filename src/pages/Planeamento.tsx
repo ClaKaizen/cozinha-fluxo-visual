@@ -79,6 +79,7 @@ export default function Planeamento() {
       equipment: store.equipment,
       operatorsForDate: ops,
       tempOperators: store.tempOperators,
+      sequencingRules: store.sequencingRules,
     });
     return sched.hasOvertime;
   };
