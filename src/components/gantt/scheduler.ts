@@ -36,6 +36,8 @@ export interface MachineBooking {
   colorIndex: number;
   showSimultaneousBadge?: boolean;
   isSequentialPhase?: boolean;
+  isDedicated?: boolean;
+  roleLabel?: string;
 }
 
 export interface PlanningTask {
@@ -64,6 +66,8 @@ export interface MachineTask extends PlanningTask {
   isSequentialPhase: boolean;
   isFirstPhase: boolean;
   isLunchSafe: boolean;
+  isDedicated: boolean;
+  roleLabel: string;
 }
 
 export interface OperatorTask extends PlanningTask {
