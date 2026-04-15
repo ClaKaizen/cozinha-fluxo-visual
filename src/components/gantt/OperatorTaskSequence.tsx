@@ -22,26 +22,88 @@ function formatMinutes(totalMinutes: number) {
   return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
 }
 
-function buildEntries(tasks: OperatorTask[], lunchStart: number, lunchEnd: number, showLunch: boolean) {
-  const sortedTasks = [...tasks].sort((a, b) => a.start - b.start || a.machineLabel.localeCompare(b.machineLabel));
-  const entries: Array<{ type: "task"; task: OperatorTask; index: number } | { type: "lunch" }> = [];
-  let lunchInserted = !showLunch;
-  let counter = 1;
+// ── Grouping logic ──────────────────────────────────────────────
 
-  sortedTasks.forEach((task) => {
-    if (!lunchInserted && lunchStart <= task.start) {
-      entries.push({ type: "lunch" });
-      lunchInserted = true;
+interface GroupedBlock {
+  type: "task";
+  artigo: string;
+  machines: string[];    // unique machine labels in order
+  doses: number;
+  start: number;
+  end: number;
+}
+
+interface LunchBlock {
+  type: "lunch";
+  start: number;
+  end: number;
+}
+
+type DisplayBlock = GroupedBlock | LunchBlock;
+
+function buildGroupedBlocks(
+  tasks: OperatorTask[],
+  lunchStart: number,
+  lunchEnd: number,
+  showLunch: boolean,
+): DisplayBlock[] {
+  const sorted = [...tasks].sort((a, b) => a.start - b.start);
+
+  // Group consecutive same-artigo tasks (even if machines differ)
+  const groups: GroupedBlock[] = [];
+  for (const t of sorted) {
+    const last = groups[groups.length - 1];
+    if (last && last.artigo === t.artigo) {
+      // Extend group
+      last.end = Math.max(last.end, t.end);
+      last.doses += 1;
+      if (!last.machines.includes(t.machineLabel)) {
+        last.machines.push(t.machineLabel);
+      }
+    } else {
+      groups.push({
+        type: "task",
+        artigo: t.artigo,
+        machines: [t.machineLabel],
+        doses: 1,
+        start: t.start,
+        end: t.end,
+      });
     }
-    entries.push({ type: "task", task, index: counter });
-    counter += 1;
-  });
-
-  if (!lunchInserted) {
-    entries.push({ type: "lunch" });
   }
 
-  return { entries, lunchLabel: `${formatClock(lunchStart)}–${formatClock(lunchEnd)}` };
+  // Insert lunch row at the right chronological position
+  const blocks: DisplayBlock[] = [];
+  let lunchInserted = !showLunch;
+  for (const g of groups) {
+    if (!lunchInserted && lunchStart <= g.start) {
+      blocks.push({ type: "lunch", start: lunchStart, end: lunchEnd });
+      lunchInserted = true;
+    }
+    blocks.push(g);
+  }
+  if (!lunchInserted) {
+    blocks.push({ type: "lunch", start: lunchStart, end: lunchEnd });
+  }
+
+  return blocks;
+}
+
+function formatMachines(machines: string[]): string {
+  // Extract common prefix and list unit numbers: "Fritadeira 1", "Fritadeira 2" → "Fritadeira 1 + 2"
+  if (machines.length <= 1) return machines[0] ?? "";
+
+  // Try to find common equipment type prefix
+  const extractType = (m: string) => m.replace(/\s*\(Emergência\)/, "").replace(/\s+\d+$/, "");
+  const extractNum = (m: string) => { const match = m.match(/(\d+)/); return match ? match[1] : ""; };
+
+  const types = new Set(machines.map(extractType));
+  if (types.size === 1) {
+    const prefix = [...types][0];
+    const nums = machines.map(extractNum).filter(Boolean).sort();
+    return nums.length > 0 ? `${prefix} ${nums.join(" + ")}` : machines.join(", ");
+  }
+  return machines.join(", ");
 }
 
 export default function OperatorTaskSequence({ schedule }: OperatorTaskSequenceProps) {
@@ -55,7 +117,7 @@ export default function OperatorTaskSequence({ schedule }: OperatorTaskSequenceP
           <button type="button" className="flex w-full items-center justify-between px-6 py-4 text-left">
             <div>
               <CardTitle className="text-base font-display">Sequência de Tarefas por Operador</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">Lista cronológica com almoço variável, tempos ocupados e folgas.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Tabela agrupada com máquinas, doses, horários e almoço.</p>
             </div>
             <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
           </button>
@@ -67,17 +129,18 @@ export default function OperatorTaskSequence({ schedule }: OperatorTaskSequenceP
             ) : (
               schedule.operatorRows.map((row) => {
                 const occupiedMinutes = row.tasks.reduce(
-                  (sum, task) => sum + task.segments.reduce((segmentSum, segment) => segmentSum + (segment.end - segment.start), 0),
+                  (sum, task) => sum + task.segments.reduce((s, seg) => s + (seg.end - seg.start), 0),
                   0,
                 );
                 const idleMinutes = Math.max(0, AVAILABLE_MACHINE_MINUTES - occupiedMinutes);
                 const occupancy = AVAILABLE_MACHINE_MINUTES > 0 ? (occupiedMinutes / AVAILABLE_MACHINE_MINUTES) * 100 : 0;
 
-                // Use per-operator lunch break
                 const opLunch = schedule.operatorLunchBreaks[row.label];
                 const opLunchStart = opLunch?.start ?? schedule.lunchStart;
                 const opLunchEnd = opLunch?.end ?? schedule.lunchEnd;
-                const { entries, lunchLabel } = buildEntries(row.tasks, opLunchStart, opLunchEnd, showLunch);
+                const blocks = buildGroupedBlocks(row.tasks, opLunchStart, opLunchEnd, showLunch);
+
+                let taskCounter = 0;
 
                 return (
                   <div key={row.label} className="overflow-hidden rounded-lg border bg-card">
@@ -90,40 +153,71 @@ export default function OperatorTaskSequence({ schedule }: OperatorTaskSequenceP
                         {occupancy.toFixed(0)}%
                       </Badge>
                     </CardHeader>
-                    <CardContent className="space-y-3 py-4">
+                    <CardContent className="p-0">
                       {row.tasks.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">Sem tarefas atribuídas.</p>
+                        <p className="px-4 py-3 text-sm text-muted-foreground">Sem tarefas atribuídas.</p>
                       ) : (
-                        <ol className="space-y-2 text-sm">
-                          {entries.map((entry, entryIndex) =>
-                            entry.type === "lunch" ? (
-                              <li key={`${row.label}-lunch-${entryIndex}`} className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-muted-foreground">
-                                — {lunchLabel} 🍽 Almoço
-                              </li>
-                            ) : (
-                              <li key={entry.task.id} className="rounded-md border px-3 py-2">
-                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                                  <span className="font-semibold">
-                                    {entry.index}. {formatClock(entry.task.start)}–{formatClock(entry.task.end)}
-                                  </span>
-                                  <span className="font-medium text-foreground">
-                                    {entry.task.showSimultaneousBadge ? "⊗ " : ""}
-                                    {entry.task.artigo}
-                                  </span>
-                                  <span className="text-muted-foreground">{entry.task.machineLabel}</span>
-                                </div>
-                                <p className="mt-1 text-xs text-muted-foreground">T.Homem: {entry.task.operatorDuration} min total</p>
-                              </li>
-                            ),
-                          )}
-                        </ol>
-                      )}
+                        <>
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                                <th className="w-8 px-2 py-1.5 text-center font-semibold">#</th>
+                                <th className="px-2 py-1.5 text-left font-semibold">Tarefa</th>
+                                <th className="px-2 py-1.5 text-left font-semibold hidden sm:table-cell">Máquina(s)</th>
+                                <th className="w-14 px-2 py-1.5 text-center font-semibold">Doses</th>
+                                <th className="px-2 py-1.5 text-right font-semibold hidden sm:table-cell">Início</th>
+                                <th className="px-2 py-1.5 text-right font-semibold hidden sm:table-cell">Fim</th>
+                                <th className="px-2 py-1.5 text-right font-semibold sm:hidden">Horário</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {blocks.map((block, idx) => {
+                                if (block.type === "lunch") {
+                                  return (
+                                    <tr key={`lunch-${idx}`} className="bg-muted/30 border-b">
+                                      <td className="px-2 py-1.5 text-center text-muted-foreground">🍽️</td>
+                                      <td className="px-2 py-1.5 text-muted-foreground italic" colSpan={2}>
+                                        Almoço
+                                      </td>
+                                      <td className="hidden sm:table-cell px-2 py-1.5 text-center text-muted-foreground">—</td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-xs text-muted-foreground hidden sm:table-cell">
+                                        {formatClock(block.start)}
+                                      </td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-xs text-muted-foreground hidden sm:table-cell">
+                                        {formatClock(block.end)}
+                                      </td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-xs text-muted-foreground sm:hidden">
+                                        {formatClock(block.start)}–{formatClock(block.end)}
+                                      </td>
+                                    </tr>
+                                  );
+                                }
 
-                      <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
-                        <span>Total ocupado: {formatMinutes(occupiedMinutes)}</span>
-                        <span>•</span>
-                        <span>Total ocioso: {formatMinutes(idleMinutes)}</span>
-                      </div>
+                                taskCounter += 1;
+                                const isEven = taskCounter % 2 === 0;
+                                return (
+                                  <tr key={`task-${idx}`} className={`border-b last:border-b-0 ${isEven ? "bg-muted/20" : ""}`}>
+                                    <td className="px-2 py-1.5 text-center text-xs text-muted-foreground">{taskCounter}</td>
+                                    <td className="px-2 py-1.5 font-semibold text-foreground">{block.artigo}</td>
+                                    <td className="px-2 py-1.5 text-muted-foreground hidden sm:table-cell">{formatMachines(block.machines)}</td>
+                                    <td className="px-2 py-1.5 text-center font-medium">{block.doses}</td>
+                                    <td className="px-2 py-1.5 text-right font-mono text-xs hidden sm:table-cell">{formatClock(block.start)}</td>
+                                    <td className="px-2 py-1.5 text-right font-mono text-xs hidden sm:table-cell">{formatClock(block.end)}</td>
+                                    <td className="px-2 py-1.5 text-right font-mono text-xs sm:hidden">
+                                      {formatClock(block.start)}–{formatClock(block.end)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                          <div className="flex flex-wrap items-center gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
+                            <span>Ocupado: {formatMinutes(occupiedMinutes)}</span>
+                            <span>•</span>
+                            <span>Ocioso: {formatMinutes(idleMinutes)}</span>
+                          </div>
+                        </>
+                      )}
                     </CardContent>
                   </div>
                 );
