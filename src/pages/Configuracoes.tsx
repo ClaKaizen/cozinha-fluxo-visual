@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, Trash2, Edit2, Save, X, Wrench, Tag, User, Cog, AlertTriangle, ListOrdered } from "lucide-react";
+import { Plus, Trash2, Edit2, Save, X, Wrench, Tag, User, Cog, AlertTriangle, ListOrdered, UtensilsCrossed } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -400,6 +400,9 @@ export default function Configuracoes() {
 
       {/* Sequenciamento */}
       <SequenciamentoSection />
+
+      {/* Hora de Almoço */}
+      <HoraAlmocoSection />
     </div>
   );
 }
