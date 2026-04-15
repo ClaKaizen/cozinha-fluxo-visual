@@ -16,6 +16,7 @@ interface AppState {
   absences: DayAbsence[];
   tempOperators: TempOperator[];
   sequencingRules: SequencingRule[];
+  lunchSafeCategories: string[];
 
   addEquipment: (e: Omit<Equipment, 'id'>) => void;
   updateEquipment: (id: string, e: Partial<Equipment>) => void;
