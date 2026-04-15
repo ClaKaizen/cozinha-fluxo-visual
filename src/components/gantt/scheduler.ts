@@ -249,20 +249,20 @@ function commitOperator(op: OperatorState, taskStart: number, duration: number):
     if (effectiveStart < LUNCH_WINDOW_START) {
       const taskEnd = effectiveStart + duration;
       if (taskEnd > LUNCH_LATEST_START) {
-        // Must eat lunch first
+        // Task would end after 13:00 — must eat lunch first at 12:00
         op.lunchStart = LUNCH_WINDOW_START;
         op.lunchEnd = LUNCH_WINDOW_START + LUNCH_DURATION;
         op.hadLunch = true;
         effectiveStart = op.lunchEnd;
       }
       // If taskEnd is between 12:00 and 13:00, task runs first, lunch after
-    } else if (effectiveStart >= LUNCH_WINDOW_START) {
-      // In lunch window - eat first
-      const lunchStart = Math.min(Math.max(effectiveStart, LUNCH_WINDOW_START), LUNCH_LATEST_START);
+    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < LUNCH_LATEST_START + LUNCH_DURATION) {
+      // In the lunch window — eat at the earliest valid time (operator cursor or now)
+      const lunchStart = Math.min(Math.max(op.cursor, LUNCH_WINDOW_START), LUNCH_LATEST_START);
       op.lunchStart = lunchStart;
       op.lunchEnd = lunchStart + LUNCH_DURATION;
       op.hadLunch = true;
-      effectiveStart = op.lunchEnd;
+      effectiveStart = Math.max(effectiveStart, op.lunchEnd);
     }
   } else {
     if (effectiveStart >= op.lunchStart && effectiveStart < op.lunchEnd) {
