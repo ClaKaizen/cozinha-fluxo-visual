@@ -1171,13 +1171,14 @@ export function buildDailyGanttSchedule({
     lunchEnd: LUNCH_LATEST_START + LUNCH_DURATION,
   }));
 
-  // Replay assignments to compute operator states (skip grouped/zero-duration)
+  // Replay assignments to compute operator states (skip grouped/zero-duration, use accumulated T.Homem)
   const sortedAssignments = [...result.assignments].sort((a, b) => a.operatorStart - b.operatorStart);
   for (const a of sortedAssignments) {
     if (!a.operatorName || a.operatorStart >= a.operatorEnd) continue;
     const op = operatorStates.find((o) => o.name === a.operatorName);
     if (op) {
-      commitOperator(op, a.operatorStart, a.task.operatorDuration);
+      const effectiveDuration = (a as any)._accumulatedTHomem ?? a.task.operatorDuration;
+      commitOperator(op, a.operatorStart, effectiveDuration);
     }
   }
   for (const op of operatorStates) {
