@@ -800,7 +800,8 @@ function tryAllPhases(
   // Clone tracker for speculative scheduling
   const specSlots = new Map<string, number[]>();
   tracker.slots.forEach((slots, key) => specSlots.set(key, [...slots]));
-  const specTracker: MachineSlotTracker = { slots: specSlots };
+  const specDedicated = new Map(tracker.dedicatedSlots);
+  const specTracker: MachineSlotTracker = { slots: specSlots, dedicatedSlots: specDedicated };
 
   const allAssignments: { booking: MachineBooking; machineIdx: number; start: number; end: number }[] = [];
   let phaseCursor = minStart;
