@@ -1164,6 +1164,7 @@ export function buildDailyGanttSchedule({
     result.unscheduledTasks,
     result.emergencyEquipmentNames,
     result.staffingWarning,
+    lunchSafeCategories ?? [],
   );
 
   // Determine lunch times from operator states
