@@ -387,6 +387,7 @@ function jointSchedule(
   equipmentMap: Map<string, Equipment>,
   operatorNames: string[],
   sequencingRules: SequencingRule[] = [],
+  lunchSafeCategories: string[] = [],
 ): {
   assignments: JointAssignment[];
   overflowTasks: string[];
