@@ -44,6 +44,7 @@ export interface PlanningTask {
   equipmentId: string;
   equipmentName: string;
   categoryName: string;
+  categoryId: string;
   machineDuration: number;
   operatorDuration: number;
   colorIndex: number;
