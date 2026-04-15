@@ -64,8 +64,6 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
   }
 
   const isEmergencyRowFn = (label: string) => label.includes("⚠️");
-  const isDedicatedRowFn = (label: string) => label.includes("🔒");
-  const isPairedRowFn = (label: string) => label.includes("🔗");
 
   const labelWidth = 148;
   const rowHeight = 42;
@@ -106,8 +104,6 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               ))}
               {rows.map((row) => {
                 const isEmergency = isEmergencyRowFn(row.label);
-                const isDedicated = isDedicatedRowFn(row.label);
-                const isPaired = isPairedRowFn(row.label);
                 const rowLunch = rowLunchBreaks?.[row.label];
                 const lunchLeft = rowLunch ? toPercent(rowLunch.start) : 0;
                 const lunchWidth = rowLunch ? ((rowLunch.end - rowLunch.start) / totalSpan) * 100 : 0;
@@ -117,19 +113,8 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                   <div className="truncate pr-3 text-xs font-semibold text-foreground flex items-center gap-1" style={{ width: labelWidth }}>
                     {isEmergency ? (
                       <>
-                        <span>{row.label.replace(" ⚠️", "").replace(" 🔒", "").replace(" 🔗", "")}</span>
+                        <span>{row.label.replace(" ⚠️", "")}</span>
                         <span className="inline-flex items-center rounded border border-orange-400 bg-orange-100 dark:bg-orange-900/40 px-1 py-0 text-[8px] font-bold text-orange-700 dark:text-orange-300 leading-tight">Emerg.</span>
-                        {isPaired && <span className="text-[10px]" title="Máquina emparelhada">🔗</span>}
-                      </>
-                    ) : isPaired ? (
-                      <>
-                        <span>{row.label.replace(" 🔗", "")}</span>
-                        <span className="text-[10px]" title="Máquina emparelhada">🔗</span>
-                      </>
-                    ) : isDedicated ? (
-                      <>
-                        <span>{row.label.replace(" 🔒", "")}</span>
-                        <span className="text-[10px]" title="Máquina dedicada">🔒</span>
                       </>
                     ) : row.label}
                   </div>
@@ -169,7 +154,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                                 borderStyle: (task as unknown as MachineTask).isEmergencyMachine ? "dashed" : "solid",
                               }),
                             }}
-                            title={`${task.doseLabel}${roleLabel ? ` — ${roleLabel}` : ''} ${formatClock(task.start)}–${formatClock(task.end)}${(task as unknown as MachineTask).isPaired ? `\nPar com ${task.artigo} (${roleLabel || 'principal'})` : (task as unknown as MachineTask).isDedicated ? `\nDedicada a: ${roleLabel || task.artigo}` : ''}`}
+                            title={`${task.doseLabel}${roleLabel ? ` — ${roleLabel}` : ''} ${formatClock(task.start)}–${formatClock(task.end)}`}
                           >
                             {showLabel && (
                               <span className="truncate leading-tight">{labelPrefix}{task.artigo}{roleLabel ? ` — ${roleLabel}` : ''}</span>
@@ -215,10 +200,6 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               <div className="flex items-center gap-1.5">
                 <div className="flex h-3 w-3 items-center justify-center rounded-sm border border-border text-[9px] font-bold text-foreground">→</div>
                 <span className="text-muted-foreground">Sequencial (prep)</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="flex h-3 w-3 items-center justify-center rounded-sm border border-border text-[9px] font-bold text-foreground">🔗</div>
-                <span className="text-muted-foreground">Par dedicado</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="h-3 w-3 rounded-sm border border-dashed border-red-500 bg-red-100/60" />
