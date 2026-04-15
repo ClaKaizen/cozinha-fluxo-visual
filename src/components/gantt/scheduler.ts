@@ -505,35 +505,39 @@ function jointSchedule(
   const emergencyEquipmentNames = new Set<string>();
 
   // Track operator coverage per equipment type for grouping:
-  // equipmentId → array of { operatorName, start, end }
-  const equipmentOperatorCoverage = new Map<string, { operatorName: string; start: number; end: number }[]>();
+  // equipmentId → { operatorName, assignmentIndex (first assignment), accumulatedTHomem, groupStart }
+  interface EquipGroupCoverage {
+    operatorName: string;
+    firstAssignmentIndex: number;
+    accumulatedTHomem: number;
+    groupStart: number;
+  }
+  const equipmentOperatorCoverage = new Map<string, EquipGroupCoverage[]>();
 
-  function findCoveringOperator(equipmentId: string, machineStart: number, machineEnd: number): string | null {
+  function findCoveringGroup(equipmentId: string, machineStart: number, machineEnd: number): EquipGroupCoverage | null {
     const eq = equipmentMap.get(equipmentId);
     const opsPerGroup = eq?.operatorsPerGroup ?? 1;
     const coverages = equipmentOperatorCoverage.get(equipmentId) ?? [];
     // Find coverages that overlap with this machine window
-    const overlapping = coverages.filter(c => c.start < machineEnd && c.end > machineStart);
-    // If we already have enough operators covering this window, reuse one
+    // For operator grouping, we consider any coverage on the same equipment type
+    // where the operator is still working (their accumulated block overlaps)
+    const overlapping = coverages.filter(c => {
+      const coverageEnd = c.groupStart + c.accumulatedTHomem;
+      // The machine windows overlap or the operator is still working during this machine window
+      return machineStart < coverageEnd + 60; // allow some slack for sequential dose handling
+    });
     if (overlapping.length >= opsPerGroup) {
-      return overlapping[0].operatorName; // already covered
+      return overlapping[0]; // already covered
     }
-    return null; // need a new operator
+    return null;
   }
 
-  function addCoverage(equipmentId: string, operatorName: string, start: number, end: number) {
+  function addCoverage(equipmentId: string, operatorName: string, assignmentIndex: number, tHomem: number, groupStart: number) {
     if (!equipmentOperatorCoverage.has(equipmentId)) {
       equipmentOperatorCoverage.set(equipmentId, []);
     }
-    // Extend existing coverage for same operator if overlapping, else add new
     const coverages = equipmentOperatorCoverage.get(equipmentId)!;
-    const existing = coverages.find(c => c.operatorName === operatorName && c.start <= end && c.end >= start);
-    if (existing) {
-      existing.start = Math.min(existing.start, start);
-      existing.end = Math.max(existing.end, end);
-    } else {
-      coverages.push({ operatorName, start, end });
-    }
+    coverages.push({ operatorName, firstAssignmentIndex: assignmentIndex, accumulatedTHomem: tHomem, groupStart });
   }
 
   function tryScheduleAll(allowEmergency: boolean, tasksToSchedule: PlanningTask[]): PlanningTask[] {
@@ -554,7 +558,6 @@ function jointSchedule(
     for (const task of tasksToSchedule) {
       const depMinStart = getMinStartForTask(task);
 
-      // Determine the primary equipment for this task (for operator grouping)
       const primaryEqId = task.equipmentId;
       const eq = equipmentMap.get(primaryEqId);
       const opsPerGroup = eq?.operatorsPerGroup ?? 1;
@@ -567,24 +570,44 @@ function jointSchedule(
           if (slots) slots[ma.machineIdx] = ma.end;
         }
 
-        // Only commit operator if not covered by existing group
+        // Operator grouping logic
         if (result.operatorName && task.operatorDuration > 0) {
           const machineStart = Math.min(...result.machineAssignments.map(ma => ma.start));
           const machineEnd = Math.max(...result.machineAssignments.map(ma => ma.end));
-          const coveringOp = findCoveringOperator(primaryEqId, machineStart, machineEnd);
+          const coveringGroup = findCoveringGroup(primaryEqId, machineStart, machineEnd);
 
-          if (coveringOp) {
-            // Operator already covers this equipment group — reuse, don't commit new work
-            result.operatorName = coveringOp;
+          if (coveringGroup) {
+            // Operator already covers this equipment group — accumulate T.Homem
+            coveringGroup.accumulatedTHomem += task.operatorDuration;
+
+            // Update the first assignment's operator end to reflect accumulated T.Homem
+            const firstAssignment = assignments[coveringGroup.firstAssignmentIndex];
+            if (firstAssignment) {
+              firstAssignment.operatorEnd = coveringGroup.groupStart + coveringGroup.accumulatedTHomem;
+              // Update the first assignment's task operatorDuration to the accumulated total
+              // (we'll use a special field to track this)
+              (firstAssignment as any)._accumulatedTHomem = coveringGroup.accumulatedTHomem;
+              (firstAssignment as any)._groupedMachineCount = ((firstAssignment as any)._groupedMachineCount ?? 1) + 1;
+            }
+
+            // Commit the additional T.Homem to the operator
+            const op = operators.find(o => o.name === coveringGroup.operatorName);
+            if (op) {
+              op.totalWorked += task.operatorDuration;
+              op.cursor = Math.max(op.cursor, coveringGroup.groupStart + coveringGroup.accumulatedTHomem);
+            }
+
+            // Mark this assignment as grouped (zero-duration, covered by first)
+            result.operatorName = coveringGroup.operatorName;
             result.operatorStart = machineStart;
-            result.operatorEnd = machineStart; // zero-duration for this dose
-            // Extend coverage
-            addCoverage(primaryEqId, coveringOp, machineStart, machineEnd);
+            result.operatorEnd = machineStart; // zero-duration marker
           } else {
             // Need new operator assignment
             const op = operators.find((o) => o.name === result.operatorName)!;
             if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
-            addCoverage(primaryEqId, result.operatorName, machineStart, machineEnd);
+            // Register coverage
+            const assignmentIndex = assignments.length; // this will be the index
+            addCoverage(primaryEqId, result.operatorName, assignmentIndex, task.operatorDuration, result.operatorStart);
           }
         }
 
@@ -877,19 +900,28 @@ function buildGanttFromAssignments(
     }
 
     // Create operator task — skip if this dose's operator work is covered by grouping (zero-duration)
-    if (operatorName && task.operatorDuration > 0 && operatorStart < operatorEnd) {
+    const accumulatedTHomem = (assignment as any)._accumulatedTHomem as number | undefined;
+    const groupedMachineCount = (assignment as any)._groupedMachineCount as number | undefined;
+    const effectiveOpDuration = accumulatedTHomem ?? task.operatorDuration;
+
+    if (operatorName && effectiveOpDuration > 0 && operatorStart < operatorEnd) {
       const opState = operatorStates.find((o) => o.name === operatorName);
       const opLunchStart = opState?.lunchStart ?? LUNCH_LATEST_START;
       const opLunchEnd = opState?.lunchEnd ?? LUNCH_LATEST_START + LUNCH_DURATION;
 
-      // Build segments respecting lunch
-      const opSegments = buildOperatorSegments(operatorStart, task.operatorDuration, opLunchStart, opLunchEnd);
+      // Build segments respecting lunch using the full accumulated T.Homem
+      const opSegments = buildOperatorSegments(operatorStart, effectiveOpDuration, opLunchStart, opLunchEnd);
 
       const firstMachine = machineTasksForThisAssignment[0];
-      const machineLabel = machineTasksForThisAssignment.map((mt) => mt.machineLabel).join(" + ");
+      const eqName = firstMachine?.equipmentName ?? task.equipmentName;
+      const machineCount = groupedMachineCount ?? 1;
+      const machineLabel = machineCount > 1
+        ? `${eqName} (×${machineCount})`
+        : machineTasksForThisAssignment.map((mt) => mt.machineLabel).join(" + ");
 
       const ot: OperatorTask = {
         ...task,
+        operatorDuration: effectiveOpDuration,
         operatorName,
         start: opSegments.start,
         end: opSegments.end,
@@ -1139,13 +1171,14 @@ export function buildDailyGanttSchedule({
     lunchEnd: LUNCH_LATEST_START + LUNCH_DURATION,
   }));
 
-  // Replay assignments to compute operator states (skip grouped/zero-duration)
+  // Replay assignments to compute operator states (skip grouped/zero-duration, use accumulated T.Homem)
   const sortedAssignments = [...result.assignments].sort((a, b) => a.operatorStart - b.operatorStart);
   for (const a of sortedAssignments) {
     if (!a.operatorName || a.operatorStart >= a.operatorEnd) continue;
     const op = operatorStates.find((o) => o.name === a.operatorName);
     if (op) {
-      commitOperator(op, a.operatorStart, a.task.operatorDuration);
+      const effectiveDuration = (a as any)._accumulatedTHomem ?? a.task.operatorDuration;
+      commitOperator(op, a.operatorStart, effectiveDuration);
     }
   }
   for (const op of operatorStates) {

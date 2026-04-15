@@ -140,10 +140,9 @@ export const useStore = create<AppState>()(
         const temps = state.tempOperators.filter((t) => t.date === date);
 
         // Carga: T. Homem with operator grouping (Op./Grupo)
-        // Group production by equipment type — for each batch of simultaneous machines,
-        // only operatorsPerGroup operators' worth of T.Homem counts
+        // Total T.Homem = T.Homem 1ª + (QD-1) × T.Homem Seg. — always sequential per operator
+        // Multiply by operatorsPerGroup (1 by default, more if configured)
         let cargaMinutes = 0;
-        const prodByEquipment = new Map<string, { tHomemTotal: number; doses: number }>();
         prod.forEach((p) => {
           const cat = state.categories.find((c) => c.id === p.categoriaId);
           if (cat) {
@@ -151,9 +150,10 @@ export const useStore = create<AppState>()(
             const totalTHomem = tHomem1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloHomem : 0);
             const eq = state.equipment.find((e) => e.id === cat.equipamentoId);
             const opsPerGroup = eq?.operatorsPerGroup ?? 1;
-            // With grouping: effective T.Homem = T.Homem per dose × opsPerGroup (not × machines)
-            // Since doses run sequentially per machine, and opsPerGroup operators cover all machines:
-            cargaMinutes += totalTHomem * opsPerGroup / Math.max(1, Math.min(p.quantidade, eq?.quantidade ?? 1));
+            // With Op./Grupo: the total hands-on time stays the same, but shared across opsPerGroup operators
+            // Contribution = totalTHomem (not divided by machines, not multiplied by machines)
+            // For opsPerGroup > 1: multiply because each operator does the full workload
+            cargaMinutes += totalTHomem * opsPerGroup;
           }
         });
         const cargaTeorica = cargaMinutes / 60;
