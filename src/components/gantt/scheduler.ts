@@ -1019,6 +1019,7 @@ export function buildDailyGanttSchedule({
   operatorsForDate,
   tempOperators,
   sequencingRules,
+  lunchSafeCategories,
 }: BuildScheduleInput): DailyGanttSchedule {
   const selectedDate = normalizeDateKey(dateStr);
   const equipmentIndex = new Map(equipment.map((item, idx) => [item.id, idx]));
