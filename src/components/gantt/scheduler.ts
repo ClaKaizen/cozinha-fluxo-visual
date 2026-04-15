@@ -600,13 +600,14 @@ function tryJointSlot(
   equipmentMap: Map<string, Equipment>,
   allowEmergency: boolean,
   equipment: Equipment[],
+  minStartOverride: number = DAY_START,
 ): JointAssignment | null {
   const phases = buildBookingPhases(task);
   if (phases.length === 0) return null;
 
   // We need to find a time where both machine(s) and an operator are free
   // Try incrementally advancing candidateTime
-  let candidateTime = DAY_START;
+  let candidateTime = Math.max(DAY_START, minStartOverride);
   const MAX_ITERATIONS = 200;
 
   for (let iter = 0; iter < MAX_ITERATIONS && candidateTime < OPERATOR_HARD_STOP; iter++) {
