@@ -573,3 +573,66 @@ function SequenciamentoSection() {
     </Card>
   );
 }
+
+/* ── Hora de Almoço Section ──────────────────────────────── */
+
+function HoraAlmocoSection() {
+  const store = useStore();
+  const categories = store.categories;
+  const lunchSafe = store.lunchSafeCategories;
+
+  const [selectedCat, setSelectedCat] = useState('');
+
+  const availableCategories = categories.filter(c => !lunchSafe.includes(c.id));
+
+  const handleAdd = () => {
+    if (!selectedCat) return;
+    store.addLunchSafeCategory(selectedCat);
+    setSelectedCat('');
+  };
+
+  const catName = (id: string) => categories.find(c => c.id === id)?.nome ?? '?';
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-3 rounded-t-lg" style={{ backgroundColor: "hsl(215, 25%, 34%)" }}>
+        <UtensilsCrossed className="h-4 w-4 text-white" />
+        <span className="text-white font-display font-semibold text-base">Hora de Almoço</span>
+      </div>
+      <CardContent className="pt-4">
+        <p className="text-xs text-muted-foreground mb-3">
+          Categorias aqui listadas podem ter os seus equipamentos a funcionar autonomamente durante a hora de almoço. As restantes obrigam à presença de um operador.
+        </p>
+
+        {lunchSafe.length > 0 ? (
+          <div className="space-y-1 mb-3">
+            {lunchSafe.map((catId) => (
+              <div key={catId} className="flex items-center justify-between px-3 py-1.5 rounded border bg-muted/20 hover:bg-muted/40">
+                <span className="text-sm font-medium">• {catName(catId)}</span>
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => store.removeLunchSafeCategory(catId)}>
+                  <Trash2 className="h-3 w-3 text-destructive" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground italic mb-3">Nenhuma categoria configurada — todos os equipamentos param durante o almoço.</p>
+        )}
+
+        <div className="flex gap-2 items-center">
+          <Select value={selectedCat} onValueChange={setSelectedCat}>
+            <SelectTrigger className="h-8 text-xs w-[200px]"><SelectValue placeholder="Categoria..." /></SelectTrigger>
+            <SelectContent>
+              {availableCategories.map(c => (
+                <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button onClick={handleAdd} size="sm" className="h-8 text-xs" style={{ backgroundColor: '#FFD966', color: '#44546A' }} disabled={!selectedCat}>
+            <Plus className="h-3 w-3 mr-1" /> Adicionar
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

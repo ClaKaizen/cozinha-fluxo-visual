@@ -122,6 +122,7 @@ interface BuildScheduleInput {
   operatorsForDate: OperatorPresence[];
   tempOperators: TempOperator[];
   sequencingRules?: SequencingRule[];
+  lunchSafeCategories?: string[];
 }
 
 // ── Helpers ──────────────────────────────────────────────
