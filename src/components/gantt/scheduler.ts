@@ -308,6 +308,7 @@ function findEarliestMachineSlot(
   equipmentMap: Map<string, Equipment>,
   allowEmergency: boolean,
   hardStop: number,
+  categoryId?: string,
 ): { assignments: { booking: MachineBooking; machineIdx: number; start: number; end: number }[]; phaseStart: number } | null {
   // Group bookings by equipment
   const grouped = new Map<string, MachineBooking[]>();
@@ -315,6 +316,16 @@ function findEarliestMachineSlot(
     const arr = grouped.get(b.equipmentId) ?? [];
     arr.push(b);
     grouped.set(b.equipmentId, arr);
+  });
+
+  // Collect all dedicated machine indices that are reserved by OTHER categories
+  const reservedByOthers = new Set<string>(); // "eqId:machIdx"
+  tracker.dedicatedSlots.forEach((machIdx, key) => {
+    const [resCatId] = key.split(":");
+    if (resCatId !== categoryId) {
+      const eqId = key.split(":")[1];
+      reservedByOthers.add(`${eqId}:${machIdx}`);
+    }
   });
 
   // For each equipment group, find the N earliest-available slots
@@ -329,15 +340,33 @@ function findEarliestMachineSlot(
     const maxIdx = allowEmergency ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
     if (maxIdx < bookings.length) return null;
 
-    // Get indices sorted by availability (earliest-free first)
-    const availableIndices = Array.from({ length: maxIdx }, (_, i) => i)
-      .sort((a, b) => (slots[a] ?? DAY_START) - (slots[b] ?? DAY_START));
-
     for (let bi = 0; bi < bookings.length; bi++) {
-      const idx = availableIndices[bi];
-      const slotAvail = Math.max(slots[idx] ?? DAY_START, minStart);
-      if (slotAvail > phaseStart) phaseStart = slotAvail;
-      slotPicks.push({ equipmentId: eqId, booking: bookings[bi], machineIdx: idx });
+      const booking = bookings[bi];
+
+      // Check if this booking's category already has a dedicated slot reserved
+      const dedicatedKey = `${categoryId}:${eqId}`;
+      const existingDedicated = booking.isDedicated && categoryId ? tracker.dedicatedSlots.get(dedicatedKey) : undefined;
+
+      if (existingDedicated !== undefined) {
+        // Reuse the same dedicated machine
+        const slotAvail = Math.max(slots[existingDedicated] ?? DAY_START, minStart);
+        if (slotAvail > phaseStart) phaseStart = slotAvail;
+        slotPicks.push({ equipmentId: eqId, booking, machineIdx: existingDedicated });
+      } else {
+        // Get indices sorted by availability (earliest-free first), excluding reserved-by-others
+        const availableIndices = Array.from({ length: maxIdx }, (_, i) => i)
+          .filter(i => !reservedByOthers.has(`${eqId}:${i}`))
+          .sort((a, b) => (slots[a] ?? DAY_START) - (slots[b] ?? DAY_START));
+
+        // Skip indices already picked
+        const alreadyPicked = slotPicks.filter(p => p.equipmentId === eqId).map(p => p.machineIdx);
+        const idx = availableIndices.find(i => !alreadyPicked.includes(i));
+        if (idx === undefined) return null;
+
+        const slotAvail = Math.max(slots[idx] ?? DAY_START, minStart);
+        if (slotAvail > phaseStart) phaseStart = slotAvail;
+        slotPicks.push({ equipmentId: eqId, booking, machineIdx: idx });
+      }
     }
   }
 
