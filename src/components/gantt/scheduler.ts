@@ -32,6 +32,7 @@ export interface MachineBooking {
   equipmentName: string;
   duration: number;
   simultaneous: boolean;
+  isFirstPhase?: boolean;
   colorIndex: number;
   showSimultaneousBadge?: boolean;
   isSequentialPhase?: boolean;
@@ -61,6 +62,7 @@ export interface MachineTask extends PlanningTask {
   isEmergencyMachine: boolean;
   showSimultaneousBadge: boolean;
   isSequentialPhase: boolean;
+  isFirstPhase: boolean;
 }
 
 export interface OperatorTask extends PlanningTask {
@@ -347,9 +349,18 @@ function findEarliestMachineSlot(
  * Build sequential booking phases from a task's bookings.
  */
 function buildBookingPhases(task: PlanningTask): MachineBooking[][] {
-  const sequentialPhases = task.machineBookings.filter((b) => !b.simultaneous).map((b) => [b]);
-  const simultaneousPhase = task.machineBookings.filter((b) => b.simultaneous);
-  return simultaneousPhase.length > 0 ? [...sequentialPhases, simultaneousPhase] : sequentialPhases;
+  // Phase 1: "1º" (isFirstPhase) equipment — run first, in parallel if multiple
+  const firstPhase = task.machineBookings.filter((b) => b.isFirstPhase);
+  // Phase 2: primary + simultaneous equipment — run together after "1º" completes
+  const simultaneousPhase = task.machineBookings.filter((b) => b.simultaneous && !b.isFirstPhase);
+  // Phase 3: remaining sequential (neither 1º nor simultaneous)
+  const flexiblePhases = task.machineBookings.filter((b) => !b.simultaneous && !b.isFirstPhase).map((b) => [b]);
+
+  const phases: MachineBooking[][] = [];
+  if (firstPhase.length > 0) phases.push(firstPhase);
+  if (simultaneousPhase.length > 0) phases.push(simultaneousPhase);
+  phases.push(...flexiblePhases);
+  return phases;
 }
 
 // ── Joint scheduling result ──────────────────────────────
@@ -805,6 +816,7 @@ function buildGanttFromAssignments(
         isEmergencyMachine,
         showSimultaneousBadge: Boolean(ma.booking.showSimultaneousBadge),
         isSequentialPhase: Boolean(ma.booking.isSequentialPhase),
+        isFirstPhase: Boolean(ma.booking.isFirstPhase),
       };
 
       machineTasksForThisAssignment.push(mt);
@@ -999,13 +1011,15 @@ export function buildDailyGanttSchedule({
               ? (extra.tempoCicloMaquina1 ?? extra.tempoCicloMaquina)
               : extra.tempoCicloMaquina;
             if (extraDuration <= 0) continue;
+            const isFirstPhase = extra.isFirst ?? false;
             bookings.push({
               equipmentId: extraEq.id,
               equipmentName: extraEq.nome,
               duration: extraDuration,
-              simultaneous: extra.simultaneo,
-              colorIndex: extra.simultaneo ? primaryColorIndex : (equipmentIndex.get(extraEq.id) ?? 0) % 6,
-              isSequentialPhase: !extra.simultaneo,
+              simultaneous: extra.simultaneo && !isFirstPhase,
+              isFirstPhase,
+              colorIndex: (extra.simultaneo && !isFirstPhase) ? primaryColorIndex : (equipmentIndex.get(extraEq.id) ?? 0) % 6,
+              isSequentialPhase: !extra.simultaneo && !isFirstPhase,
             });
           }
         }

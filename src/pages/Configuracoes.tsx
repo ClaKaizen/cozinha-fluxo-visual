@@ -94,7 +94,7 @@ export default function Configuracoes() {
   const addExtraEquipment = () => {
     setCatForm(f => ({
       ...f,
-      equipamentos: [...f.equipamentos, { equipamentoId: "", tempoCicloMaquina: 0, tempoCicloMaquina1: undefined, simultaneo: false }],
+      equipamentos: [...f.equipamentos, { equipamentoId: "", tempoCicloMaquina: 0, tempoCicloMaquina1: undefined, simultaneo: false, isFirst: false }],
     }));
   };
 
@@ -271,7 +271,11 @@ export default function Configuracoes() {
                                   <Input type="number" value={entry.tempoCicloMaquina} onChange={(e) => updateExtraEquipment(idx, { tempoCicloMaquina: Number(e.target.value) || 0 })} className={inputCls} placeholder="min" />
                                 </div>
                                 <div className="flex items-center gap-1">
-                                  <Switch checked={entry.simultaneo} onCheckedChange={(v) => updateExtraEquipment(idx, { simultaneo: v })} />
+                                  <Switch checked={entry.isFirst ?? false} onCheckedChange={(v) => updateExtraEquipment(idx, { isFirst: v, simultaneo: v ? false : entry.simultaneo })} />
+                                  <Label className="text-[10px]">1º</Label>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Switch checked={entry.simultaneo} onCheckedChange={(v) => updateExtraEquipment(idx, { simultaneo: v, isFirst: v ? false : (entry.isFirst ?? false) })} />
                                   <Label className="text-[10px]">Simult.</Label>
                                 </div>
                                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => removeExtraEquipment(idx)}>
@@ -304,7 +308,7 @@ export default function Configuracoes() {
                                 return (
                                   <Badge key={i} variant="outline" className="text-[10px] px-2 py-0 font-medium border"
                                     style={{ borderColor: exColor, color: exColor, backgroundColor: exColor + "15" }}>
-                                    {exEq?.nome || "?"} {extra.simultaneo ? "⚡" : "→"}
+                                    {exEq?.nome || "?"} {extra.isFirst ? "1→" : extra.simultaneo ? "⚡" : "→"}
                                   </Badge>
                                 );
                               })}
