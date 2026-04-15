@@ -16,7 +16,7 @@ export const MACHINE_TARGET_STOP = 15 * 60 + 40; // 940 — 15:40
 export const AVAILABLE_MACHINE_MINUTES = 480;
 const LUNCH_WINDOW_START = 12 * 60;  // 720
 const LUNCH_LATEST_START = 13 * 60;  // 780
-const LUNCH_DURATION = 60;
+const LUNCH_DURATION_MIN = 60;
 const OPERATOR_PRODUCTIVE_MINUTES = 450; // 07:00–15:30 minus 60min lunch
 
 // ── Shared types ──────────────────────────────────────────────
@@ -171,17 +171,18 @@ function operatorIsFreeAt(op: OperatorState, start: number, duration: number): b
   if (op.totalWorked + duration > OPERATOR_PRODUCTIVE_MINUTES) return false;
 
   let effectiveStart = Math.max(op.cursor, start);
+  const sharedLunchEnd = LUNCH_WINDOW_START + LUNCH_DURATION_MIN;
 
   if (!op.hadLunch) {
     if (effectiveStart < LUNCH_WINDOW_START) {
       const taskEnd = effectiveStart + duration;
       if (taskEnd > LUNCH_WINDOW_START) {
         // Task would cross 12:00 — send to lunch at 12:00 first
-        effectiveStart = LUNCH_WINDOW_START + LUNCH_DURATION;
+        effectiveStart = sharedLunchEnd;
       }
-    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < LUNCH_WINDOW_START + LUNCH_DURATION) {
+    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < sharedLunchEnd) {
       // In lunch hour — skip to end of shared lunch
-      effectiveStart = LUNCH_WINDOW_START + LUNCH_DURATION;
+      effectiveStart = sharedLunchEnd;
     }
   } else {
     if (effectiveStart >= op.lunchStart && effectiveStart < op.lunchEnd) {
@@ -202,17 +203,18 @@ function getOperatorEarliestStart(op: OperatorState, minStart: number, duration:
   if (op.totalWorked + duration > OPERATOR_PRODUCTIVE_MINUTES) return -1;
 
   let effectiveStart = Math.max(op.cursor, minStart);
+  const sharedLunchEnd = LUNCH_WINDOW_START + LUNCH_DURATION_MIN;
 
   if (!op.hadLunch) {
     if (effectiveStart < LUNCH_WINDOW_START) {
       const taskEnd = effectiveStart + duration;
       if (taskEnd > LUNCH_WINDOW_START) {
         // Task would cross 12:00 — eat lunch at 12:00 first
-        effectiveStart = LUNCH_WINDOW_START + LUNCH_DURATION;
+        effectiveStart = sharedLunchEnd;
       }
-    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < LUNCH_WINDOW_START + LUNCH_DURATION) {
+    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < sharedLunchEnd) {
       // In the shared lunch hour — skip to end
-      effectiveStart = LUNCH_WINDOW_START + LUNCH_DURATION;
+      effectiveStart = sharedLunchEnd;
     }
   } else {
     if (effectiveStart >= op.lunchStart && effectiveStart < op.lunchEnd) {
@@ -229,21 +231,21 @@ function getOperatorEarliestStart(op: OperatorState, minStart: number, duration:
  */
 function commitOperator(op: OperatorState, taskStart: number, duration: number): { opStart: number; opEnd: number } {
   let effectiveStart = Math.max(op.cursor, taskStart);
+  const sharedLunchStart = op.lunchStart;
+  const sharedLunchEnd = sharedLunchStart + LUNCH_DURATION_MIN;
 
   if (!op.hadLunch) {
-    if (effectiveStart < LUNCH_WINDOW_START) {
+    if (effectiveStart < sharedLunchStart) {
       const taskEnd = effectiveStart + duration;
-      if (taskEnd > LUNCH_WINDOW_START) {
-        // Task would cross 12:00 — send to shared lunch at 12:00
-        op.lunchStart = LUNCH_WINDOW_START;
-        op.lunchEnd = LUNCH_WINDOW_START + LUNCH_DURATION;
+      if (taskEnd > sharedLunchStart) {
+        op.lunchStart = sharedLunchStart;
+        op.lunchEnd = sharedLunchEnd;
         op.hadLunch = true;
         effectiveStart = op.lunchEnd;
       }
-    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < LUNCH_WINDOW_START + LUNCH_DURATION) {
-      // In the shared lunch hour — eat at 12:00
-      op.lunchStart = LUNCH_WINDOW_START;
-      op.lunchEnd = LUNCH_WINDOW_START + LUNCH_DURATION;
+    } else if (effectiveStart >= sharedLunchStart && effectiveStart < sharedLunchEnd) {
+      op.lunchStart = sharedLunchStart;
+      op.lunchEnd = sharedLunchEnd;
       op.hadLunch = true;
       effectiveStart = Math.max(effectiveStart, op.lunchEnd);
     }
@@ -265,11 +267,30 @@ function commitOperator(op: OperatorState, taskStart: number, duration: number):
  */
 function ensureLunch(op: OperatorState) {
   if (!op.hadLunch && op.cursor >= LUNCH_WINDOW_START) {
-    op.lunchStart = LUNCH_WINDOW_START;
-    op.lunchEnd = LUNCH_WINDOW_START + LUNCH_DURATION;
+    op.lunchEnd = op.lunchStart + LUNCH_DURATION_MIN;
     op.hadLunch = true;
     if (op.cursor < op.lunchEnd) op.cursor = op.lunchEnd;
   }
+}
+
+function chooseSharedLunchStart(operators: OperatorState[]): number {
+  const candidates = Array.from({ length: 5 }, (_, index) => LUNCH_WINDOW_START + index * 15);
+  let bestStart = LUNCH_WINDOW_START;
+  let bestFreeCount = -1;
+
+  for (const candidate of candidates) {
+    const freeCount = operators.reduce((count, op) => {
+      const cursorAtCandidate = Math.max(op.cursor, candidate);
+      return count + (cursorAtCandidate === candidate ? 1 : 0);
+    }, 0);
+
+    if (freeCount > bestFreeCount) {
+      bestFreeCount = freeCount;
+      bestStart = candidate;
+    }
+  }
+
+  return bestStart;
 }
 
 // ── Machine slot tracker ──────────────────────────────
@@ -761,9 +782,15 @@ function jointSchedule(
     cursor: DAY_START,
     totalWorked: 0,
     hadLunch: false,
-    lunchStart: LUNCH_LATEST_START,
-    lunchEnd: LUNCH_LATEST_START + LUNCH_DURATION,
+    lunchStart: LUNCH_WINDOW_START,
+    lunchEnd: LUNCH_WINDOW_START + LUNCH_DURATION_MIN,
   }));
+
+  const sharedLunchStart = chooseSharedLunchStart(operators);
+  operators.forEach((op) => {
+    op.lunchStart = sharedLunchStart;
+    op.lunchEnd = sharedLunchStart + LUNCH_DURATION_MIN;
+  });
 
   const assignments: JointAssignment[] = [];
   const overflowTasks: string[] = [];
@@ -971,7 +998,7 @@ function tryJointSlot(
     // Lunch constraint: non-lunch-safe tasks cannot have machines running during the actual 1-hour lunch block
     if (!isLunchSafe && task.operatorDuration > 0) {
       const lunchBlockStart = LUNCH_WINDOW_START;
-      const lunchBlockEnd = LUNCH_WINDOW_START + LUNCH_DURATION;
+      const lunchBlockEnd = LUNCH_WINDOW_START + LUNCH_DURATION_MIN;
 
       const anyOverlapsLunch = machineResult.allAssignments.some((a) =>
         a.start < lunchBlockEnd && a.end > lunchBlockStart
@@ -1217,8 +1244,8 @@ function buildGanttFromAssignments(
     // Create per-dose operator task — each dose gets its own small T.Homem block
     if (operatorName && task.operatorDuration > 0 && operatorStart < operatorEnd) {
       const opState = operatorStates.find((o) => o.name === operatorName);
-      const opLunchStart = opState?.lunchStart ?? LUNCH_LATEST_START;
-      const opLunchEnd = opState?.lunchEnd ?? LUNCH_LATEST_START + LUNCH_DURATION;
+      const opLunchStart = opState?.lunchStart ?? LUNCH_WINDOW_START;
+      const opLunchEnd = opState?.lunchEnd ?? (opLunchStart + LUNCH_DURATION_MIN);
 
       // Build segments for this dose's T.Homem only
       const opSegments = buildOperatorSegments(operatorStart, task.operatorDuration, opLunchStart, opLunchEnd);
@@ -1452,7 +1479,7 @@ export function buildDailyGanttSchedule({
     return {
       tasks: [], machineRows: [], operatorRows: [], axisEnd: DAY_END,
       usesEmergencyEquipment: false, emergencyEquipmentNames: [], overflowTasks: [],
-      unscheduledTasks: [], lunchStart: LUNCH_LATEST_START, lunchEnd: LUNCH_LATEST_START + LUNCH_DURATION,
+      unscheduledTasks: [], lunchStart: LUNCH_WINDOW_START, lunchEnd: LUNCH_WINDOW_START + LUNCH_DURATION_MIN,
       hasOvertime: false, operatorLunchBreaks: {}, machineLunchBreaks: {},
     };
   }
@@ -1476,8 +1503,8 @@ export function buildDailyGanttSchedule({
     cursor: DAY_START,
     totalWorked: 0,
     hadLunch: false,
-    lunchStart: LUNCH_LATEST_START,
-    lunchEnd: LUNCH_LATEST_START + LUNCH_DURATION,
+    lunchStart: result.assignments.length > 0 ? Math.min(...result.assignments.map(() => LUNCH_WINDOW_START)) : LUNCH_WINDOW_START,
+    lunchEnd: LUNCH_WINDOW_START + LUNCH_DURATION_MIN,
   }));
 
   // Replay assignments to compute operator states — each dose gets its own small T.Homem commit
@@ -1491,6 +1518,19 @@ export function buildDailyGanttSchedule({
   }
   for (const op of operatorStates) {
     ensureLunch(op);
+  }
+
+  if (selectedDate === "2026-04-16") {
+    operatorStates.slice(0, 3).forEach((op) => {
+      console.log("[Lunch Debug 16/04]", {
+        operator: op.name,
+        lunchStart: op.lunchStart,
+        lunchEnd: op.lunchEnd,
+        lunchDuration: op.lunchEnd - op.lunchStart,
+        lunchStartClock: formatClock(op.lunchStart),
+        lunchEndClock: formatClock(op.lunchEnd),
+      });
+    });
   }
 
   const gantt = buildGanttFromAssignments(
@@ -1508,8 +1548,8 @@ export function buildDailyGanttSchedule({
 
   // Determine lunch times from operator states
   const lunchStarts = operatorStates.map((o) => o.lunchStart);
-  const lunchStart = lunchStarts.length > 0 ? Math.min(...lunchStarts) : LUNCH_LATEST_START;
-  const lunchEnd = lunchStart + LUNCH_DURATION;
+  const lunchStart = lunchStarts.length > 0 ? Math.min(...lunchStarts) : LUNCH_WINDOW_START;
+  const lunchEnd = lunchStart + LUNCH_DURATION_MIN;
 
   return {
     tasks,

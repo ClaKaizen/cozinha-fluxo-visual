@@ -186,7 +186,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               {rowLunchBreaks && (
                 <div className="flex items-center gap-1.5">
                   <div className="h-3 w-3 rounded-sm bg-muted" />
-                  <span className="text-muted-foreground">Almoço (variável 12h–14h)</span>
+                  <span className="text-muted-foreground">Almoço (60 min entre 12h–14h)</span>
                 </div>
               )}
               <div className="flex items-center gap-1.5">
