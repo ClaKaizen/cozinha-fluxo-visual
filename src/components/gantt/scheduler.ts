@@ -3,6 +3,7 @@ import {
   Equipment,
   Operator,
   ProductionEntry,
+  SequencingRule,
   ShiftCode,
   TempOperator,
   WORKING_CODES,
@@ -117,6 +118,7 @@ interface BuildScheduleInput {
   equipment: Equipment[];
   operatorsForDate: OperatorPresence[];
   tempOperators: TempOperator[];
+  sequencingRules?: SequencingRule[];
 }
 
 // ── Helpers ──────────────────────────────────────────────
