@@ -669,9 +669,35 @@ function tryJointSlot(
     }
 
     const machineStart = machineResult.overallStart;
+    const machineEnd = Math.max(...machineResult.allAssignments.map(a => a.end));
 
     // Check if machine start is past hard stop
     if (machineStart >= MACHINE_TARGET_STOP) break;
+
+    // Lunch constraint: non-lunch-safe tasks cannot have machines running during lunch without operator
+    if (!isLunchSafe && task.operatorDuration > 0) {
+      // Check if any machine block spans into the lunch window
+      const anyOverlapsLunch = machineResult.allAssignments.some(a => 
+        a.start < LUNCH_LATEST_START + LUNCH_DURATION && a.end > LUNCH_WINDOW_START
+      );
+      if (anyOverlapsLunch) {
+        // For non-lunch-safe: operator must load before lunch, machine must finish before lunch
+        // OR the whole task must start after lunch
+        const operatorEndIfStartedNow = machineStart + task.operatorDuration;
+        // If operator loading would run into lunch window, push to after lunch
+        if (operatorEndIfStartedNow > LUNCH_WINDOW_START && machineStart < LUNCH_WINDOW_START) {
+          // Task loading crosses into lunch — push to after lunch
+          candidateTime = LUNCH_LATEST_START + LUNCH_DURATION;
+          continue;
+        }
+        // If the machine would still be running during lunch and needs operator presence, push after lunch
+        if (machineStart < LUNCH_WINDOW_START && machineEnd > LUNCH_WINDOW_START) {
+          // Machine spans lunch — not allowed for non-lunch-safe unless machine finishes before lunch
+          candidateTime = LUNCH_LATEST_START + LUNCH_DURATION;
+          continue;
+        }
+      }
+    }
 
     // Find operator: least-loaded who can start at machineStart for operatorDuration
     if (task.operatorDuration <= 0) {
