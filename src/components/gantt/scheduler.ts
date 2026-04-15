@@ -825,6 +825,7 @@ function tryAllPhases(
   tracker: MachineSlotTracker,
   equipmentMap: Map<string, Equipment>,
   allowEmergency: boolean,
+  categoryId?: string,
 ): { allAssignments: { booking: MachineBooking; machineIdx: number; start: number; end: number }[]; overallStart: number } | null {
   // Clone tracker for speculative scheduling
   const specSlots = new Map<string, number[]>();
