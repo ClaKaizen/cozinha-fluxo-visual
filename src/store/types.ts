@@ -3,6 +3,7 @@ export interface Equipment {
   nome: string;
   quantidade: number;
   quantidadeEmergencia: number;
+  operatorsPerGroup: number;
 }
 
 export interface CategoryEquipmentEntry {

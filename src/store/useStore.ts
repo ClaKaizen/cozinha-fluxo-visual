@@ -63,9 +63,9 @@ export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
       equipment: [
-        { id: 'eq1', nome: 'Basculante', quantidade: 4, quantidadeEmergencia: 0 },
-        { id: 'eq2', nome: 'Forno', quantidade: 3, quantidadeEmergencia: 0 },
-        { id: 'eq3', nome: 'Panela', quantidade: 2, quantidadeEmergencia: 0 },
+        { id: 'eq1', nome: 'Basculante', quantidade: 4, quantidadeEmergencia: 0, operatorsPerGroup: 1 },
+        { id: 'eq2', nome: 'Forno', quantidade: 3, quantidadeEmergencia: 0, operatorsPerGroup: 1 },
+        { id: 'eq3', nome: 'Panela', quantidade: 2, quantidadeEmergencia: 0, operatorsPerGroup: 1 },
       ],
       categories: [
         { id: 'cat1', nome: 'Molho Base Bechamel', equipamentoId: 'eq3', tempoCicloHomem: 15, tempoCicloMaquina: 45, unidade: 'kg' },
