@@ -65,6 +65,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
 
   const isEmergencyRowFn = (label: string) => label.includes("⚠️");
   const isDedicatedRowFn = (label: string) => label.includes("🔒");
+  const isPairedRowFn = (label: string) => label.includes("🔗");
 
   const labelWidth = 148;
   const rowHeight = 42;
