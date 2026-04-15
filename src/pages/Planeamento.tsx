@@ -80,6 +80,7 @@ export default function Planeamento() {
       operatorsForDate: ops,
       tempOperators: store.tempOperators,
       sequencingRules: store.sequencingRules,
+      lunchSafeCategories: store.lunchSafeCategories,
     });
     return sched.hasOvertime;
   };

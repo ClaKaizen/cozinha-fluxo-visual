@@ -56,8 +56,9 @@ export default function Dashboard() {
       operatorsForDate: operators,
       tempOperators: store.tempOperators,
       sequencingRules: store.sequencingRules,
+      lunchSafeCategories: store.lunchSafeCategories,
     }),
-    [dateStr, store.production, store.categories, store.equipment, operators, store.tempOperators, store.sequencingRules]
+    [dateStr, store.production, store.categories, store.equipment, operators, store.tempOperators, store.sequencingRules, store.lunchSafeCategories]
   );
 
   // Per-operator hours from Gantt

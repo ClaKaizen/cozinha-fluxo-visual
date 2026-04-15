@@ -16,6 +16,7 @@ interface AppState {
   absences: DayAbsence[];
   tempOperators: TempOperator[];
   sequencingRules: SequencingRule[];
+  lunchSafeCategories: string[];
 
   addEquipment: (e: Omit<Equipment, 'id'>) => void;
   updateEquipment: (id: string, e: Partial<Equipment>) => void;
@@ -42,6 +43,9 @@ interface AppState {
   addSequencingRule: (rule: Omit<SequencingRule, 'id'>) => void;
   updateSequencingRule: (id: string, rule: Partial<SequencingRule>) => void;
   deleteSequencingRule: (id: string) => void;
+
+  addLunchSafeCategory: (categoryId: string) => void;
+  removeLunchSafeCategory: (categoryId: string) => void;
 
   getProductionForDate: (date: string) => ProductionEntry[];
   getOperatorsForDate: (date: string) => { operator: Operator; code: ShiftCode; absent: boolean; hours: number }[];
@@ -78,6 +82,7 @@ export const useStore = create<AppState>()(
       absences: [],
       tempOperators: [],
       sequencingRules: [],
+      lunchSafeCategories: [],
 
       addEquipment: (e) => set((s) => ({ equipment: [...s.equipment, { ...e, id: uid() }] })),
       updateEquipment: (id, e) => set((s) => ({ equipment: s.equipment.map((eq) => eq.id === id ? { ...eq, ...e } : eq) })),
@@ -119,6 +124,13 @@ export const useStore = create<AppState>()(
       addSequencingRule: (rule) => set((s) => ({ sequencingRules: [...s.sequencingRules, { ...rule, id: uid() }] })),
       updateSequencingRule: (id, rule) => set((s) => ({ sequencingRules: s.sequencingRules.map((r) => r.id === id ? { ...r, ...rule } : r) })),
       deleteSequencingRule: (id) => set((s) => ({ sequencingRules: s.sequencingRules.filter((r) => r.id !== id) })),
+
+      addLunchSafeCategory: (categoryId) => set((s) => ({
+        lunchSafeCategories: s.lunchSafeCategories.includes(categoryId) ? s.lunchSafeCategories : [...s.lunchSafeCategories, categoryId]
+      })),
+      removeLunchSafeCategory: (categoryId) => set((s) => ({
+        lunchSafeCategories: s.lunchSafeCategories.filter((id) => id !== categoryId)
+      })),
 
       getProductionForDate: (date) => get().production.filter((p) => p.date === date),
 
@@ -171,6 +183,7 @@ export const useStore = create<AppState>()(
           operatorsForDate: ops,
           tempOperators: state.tempOperators,
           sequencingRules: state.sequencingRules,
+          lunchSafeCategories: state.lunchSafeCategories,
         });
 
         const equipMap = new Map<string, { totalMinutes: number; usesEmergency: boolean }>();

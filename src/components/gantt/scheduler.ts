@@ -63,6 +63,7 @@ export interface MachineTask extends PlanningTask {
   showSimultaneousBadge: boolean;
   isSequentialPhase: boolean;
   isFirstPhase: boolean;
+  isLunchSafe: boolean;
 }
 
 export interface OperatorTask extends PlanningTask {
@@ -122,6 +123,7 @@ interface BuildScheduleInput {
   operatorsForDate: OperatorPresence[];
   tempOperators: TempOperator[];
   sequencingRules?: SequencingRule[];
+  lunchSafeCategories?: string[];
 }
 
 // ── Helpers ──────────────────────────────────────────────
@@ -386,6 +388,7 @@ function jointSchedule(
   equipmentMap: Map<string, Equipment>,
   operatorNames: string[],
   sequencingRules: SequencingRule[] = [],
+  lunchSafeCategories: string[] = [],
 ): {
   assignments: JointAssignment[];
   overflowTasks: string[];
@@ -555,7 +558,7 @@ function jointSchedule(
       // Get preferred operator for Op./Grupo enforcement
       const preferredOp = getPreferredOperator(primaryEqId);
 
-      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp);
+      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp, lunchSafeCategories);
       if (result) {
         // Commit machine slots
         for (const ma of result.machineAssignments) {
@@ -645,7 +648,9 @@ function tryJointSlot(
   equipment: Equipment[],
   minStartOverride: number = DAY_START,
   preferredOperator?: string,
+  lunchSafeCategoryIds: string[] = [],
 ): JointAssignment | null {
+  const isLunchSafe = lunchSafeCategoryIds.includes(task.categoryId);
   const phases = buildBookingPhases(task);
   if (phases.length === 0) return null;
 
@@ -664,9 +669,35 @@ function tryJointSlot(
     }
 
     const machineStart = machineResult.overallStart;
+    const machineEnd = Math.max(...machineResult.allAssignments.map(a => a.end));
 
     // Check if machine start is past hard stop
     if (machineStart >= MACHINE_TARGET_STOP) break;
+
+    // Lunch constraint: non-lunch-safe tasks cannot have machines running during lunch without operator
+    if (!isLunchSafe && task.operatorDuration > 0) {
+      // Check if any machine block spans into the lunch window
+      const anyOverlapsLunch = machineResult.allAssignments.some(a => 
+        a.start < LUNCH_LATEST_START + LUNCH_DURATION && a.end > LUNCH_WINDOW_START
+      );
+      if (anyOverlapsLunch) {
+        // For non-lunch-safe: operator must load before lunch, machine must finish before lunch
+        // OR the whole task must start after lunch
+        const operatorEndIfStartedNow = machineStart + task.operatorDuration;
+        // If operator loading would run into lunch window, push to after lunch
+        if (operatorEndIfStartedNow > LUNCH_WINDOW_START && machineStart < LUNCH_WINDOW_START) {
+          // Task loading crosses into lunch — push to after lunch
+          candidateTime = LUNCH_LATEST_START + LUNCH_DURATION;
+          continue;
+        }
+        // If the machine would still be running during lunch and needs operator presence, push after lunch
+        if (machineStart < LUNCH_WINDOW_START && machineEnd > LUNCH_WINDOW_START) {
+          // Machine spans lunch — not allowed for non-lunch-safe unless machine finishes before lunch
+          candidateTime = LUNCH_LATEST_START + LUNCH_DURATION;
+          continue;
+        }
+      }
+    }
 
     // Find operator: least-loaded who can start at machineStart for operatorDuration
     if (task.operatorDuration <= 0) {
@@ -814,6 +845,7 @@ function buildGanttFromAssignments(
   unscheduledTasks: UnscheduledTask[],
   emergencyEquipmentNames: Set<string>,
   staffingWarning: string | null,
+  lunchSafeCategories: string[] = [],
 ): Omit<DailyGanttSchedule, 'tasks' | 'lunchStart' | 'lunchEnd'> {
   const machineRowsMap = new Map<string, GanttRow<MachineTask>>();
   const operatorRowsMap = new Map<string, GanttRow<OperatorTask>>(
@@ -863,6 +895,7 @@ function buildGanttFromAssignments(
         showSimultaneousBadge: Boolean(ma.booking.showSimultaneousBadge),
         isSequentialPhase: Boolean(ma.booking.isSequentialPhase),
         isFirstPhase: Boolean(ma.booking.isFirstPhase),
+        isLunchSafe: lunchSafeCategories.includes(task.categoryId),
       };
 
       machineTasksForThisAssignment.push(mt);
@@ -1017,6 +1050,7 @@ export function buildDailyGanttSchedule({
   operatorsForDate,
   tempOperators,
   sequencingRules,
+  lunchSafeCategories,
 }: BuildScheduleInput): DailyGanttSchedule {
   const selectedDate = normalizeDateKey(dateStr);
   const equipmentIndex = new Map(equipment.map((item, idx) => [item.id, idx]));
@@ -1120,7 +1154,7 @@ export function buildDailyGanttSchedule({
   const allOpNames = [...operatorNames, ...tempOpsForDate.map((t) => t.nome)];
 
   // Run joint optimizer
-  const result = jointSchedule(tasks, equipment, equipmentMap, allOpNames, sequencingRules ?? []);
+  const result = jointSchedule(tasks, equipment, equipmentMap, allOpNames, sequencingRules ?? [], lunchSafeCategories ?? []);
 
   // Validate
   validateSchedule(result.assignments);
@@ -1158,6 +1192,7 @@ export function buildDailyGanttSchedule({
     result.unscheduledTasks,
     result.emergencyEquipmentNames,
     result.staffingWarning,
+    lunchSafeCategories ?? [],
   );
 
   // Determine lunch times from operator states
