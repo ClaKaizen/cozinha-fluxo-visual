@@ -62,6 +62,7 @@ export interface MachineTask extends PlanningTask {
   isEmergencyMachine: boolean;
   showSimultaneousBadge: boolean;
   isSequentialPhase: boolean;
+  isFirstPhase: boolean;
 }
 
 export interface OperatorTask extends PlanningTask {
@@ -815,6 +816,7 @@ function buildGanttFromAssignments(
         isEmergencyMachine,
         showSimultaneousBadge: Boolean(ma.booking.showSimultaneousBadge),
         isSequentialPhase: Boolean(ma.booking.isSequentialPhase),
+        isFirstPhase: Boolean(ma.booking.isFirstPhase),
       };
 
       machineTasksForThisAssignment.push(mt);
