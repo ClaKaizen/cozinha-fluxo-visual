@@ -450,47 +450,38 @@ function jointSchedule(
     for (const catId of mustBeAfter.keys()) detectCycle(catId);
   }
 
-  // Split tasks into passes:
-  // Pass 1: tasks with no unmet "after" dependencies (or whose deps have no "after" deps themselves)
-  // Pass 2: deferred tasks whose deps need to be scheduled first
-  // We do topological sort of category IDs
-  const allCatIds = new Set(sortedTasks.map(t => t.id.split('-d')[0]).map(entryId => {
-    // We need categoryId from task — stored via categoryName or we can look it up
-    // Actually tasks don't carry categoryId directly, but they carry categoryName.
-    // Let's group by categoryName instead.
-    return '';
-  }));
+  // ── Two-pass topological scheduling ──
+  // Topological sort: schedule categories whose dependencies are already done first
+  const scheduledCategoryEndTimes = new Map<string, number>(); // catId → latest machine end time
 
-  // We need category mapping from task. Let me extract it from the task list.
-  // Tasks carry categoryName. Build catNameToId map.
-  const catNameToTasks = new Map<string, PlanningTask[]>();
-  for (const t of sortedTasks) {
-    const arr = catNameToTasks.get(t.categoryName) ?? [];
-    arr.push(t);
-    catNameToTasks.set(t.categoryName, arr);
+  function getMinStartForTask(task: PlanningTask): number {
+    const deps = mustBeAfter.get(task.categoryId);
+    if (!deps) return DAY_START;
+    let minStart = DAY_START;
+    for (const depCatId of deps) {
+      if (circularCategories.has(depCatId)) continue;
+      const endTime = scheduledCategoryEndTimes.get(depCatId);
+      if (endTime !== undefined) {
+        minStart = Math.max(minStart, endTime);
+      }
+    }
+    return minStart;
   }
 
-  // Build a catName→catId lookup from the tasks' associated categories
-  // We need category ID for the rules. Since tasks have categoryName, let's build a lookup.
-  // Actually, the sequencing rules use category IDs, and tasks have categoryName.
-  // We need to map task.categoryName back to category IDs.
-  // The production entries have categoriaId, and the category has nome.
-  // Let's just carry categoryId on PlanningTask — but to avoid big refactor, 
-  // let's build the mapping from the sortedTasks' source data.
-  // Actually, we can add categoryId to PlanningTask. Let me do it simpler:
-  // Track which tasks depend on what, using the map from the caller.
+  function depsScheduled(task: PlanningTask): boolean {
+    const deps = mustBeAfter.get(task.categoryId);
+    if (!deps) return true;
+    for (const depCatId of deps) {
+      if (circularCategories.has(depCatId)) continue;
+      if (!scheduledCategoryEndTimes.has(depCatId)) return false;
+    }
+    return true;
+  }
 
-  // For now, attach categoryId to each task by looking up from the production system
-  // But we don't have access here. Let's pass it through. 
-  // SIMPLER: add a `categoryId` field to PlanningTask (it's in the same file).
-  // Let me just use categoryName to match rules — but rules use IDs.
-  // The cleanest way: we need to map categoryName → categoryId.
-  // Since we don't have the categories list here, let's pass a mapping.
-  // Actually, the simplest fix: add categoryId to PlanningTask and set it during task creation.
-
-  // For now, I'll build a reverse lookup from the rules to category names.
-  // This is fragile but works: we can pass a catIdToName map as a parameter.
-  // Let me just add categoryId to PlanningTask below and set it in buildDailyGanttSchedule.
+  // Separate tasks into ready (no deps or deps already met) and deferred
+  const pass1Tasks = sortedTasks.filter(t => !circularCategories.has(t.categoryId) && depsScheduled(t));
+  const deferredTasks = sortedTasks.filter(t => !circularCategories.has(t.categoryId) && !depsScheduled(t));
+  const circularTasks = sortedTasks.filter(t => circularCategories.has(t.categoryId));
 
   // ── Step 3: Joint scheduling ──
   const operators: OperatorState[] = operatorNames.map((name) => ({
@@ -1019,6 +1010,7 @@ export function buildDailyGanttSchedule({
           equipmentId: machine.id,
           equipmentName: machine.nome,
           categoryName: cat.nome,
+          categoryId: cat.id,
           machineDuration: totalMachineDuration > 0 ? totalMachineDuration : tMaqPrimary,
           operatorDuration: tHomem,
           colorIndex: primaryColorIndex,
