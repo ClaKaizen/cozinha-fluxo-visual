@@ -63,6 +63,7 @@ export interface MachineTask extends PlanningTask {
   showSimultaneousBadge: boolean;
   isSequentialPhase: boolean;
   isFirstPhase: boolean;
+  isLunchSafe: boolean;
 }
 
 export interface OperatorTask extends PlanningTask {
