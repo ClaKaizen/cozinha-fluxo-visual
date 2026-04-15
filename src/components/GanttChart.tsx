@@ -105,6 +105,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               ))}
               {rows.map((row) => {
                 const isEmergency = isEmergencyRowFn(row.label);
+                const isDedicated = isDedicatedRowFn(row.label);
                 const rowLunch = rowLunchBreaks?.[row.label];
                 const lunchLeft = rowLunch ? toPercent(rowLunch.start) : 0;
                 const lunchWidth = rowLunch ? ((rowLunch.end - rowLunch.start) / totalSpan) * 100 : 0;
