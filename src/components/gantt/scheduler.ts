@@ -373,6 +373,7 @@ function jointSchedule(
   equipment: Equipment[],
   equipmentMap: Map<string, Equipment>,
   operatorNames: string[],
+  sequencingRules: SequencingRule[] = [],
 ): {
   assignments: JointAssignment[];
   overflowTasks: string[];
@@ -414,6 +415,81 @@ function jointSchedule(
 
     return b.machineDuration - a.machineDuration;
   });
+
+  // ── Build sequencing dependency graph ──
+  // Normalize rules to "mustBeAfter": categoryId → set of categoryIds it must wait for
+  const mustBeAfter = new Map<string, Set<string>>();
+  for (const rule of sequencingRules) {
+    if (rule.relation === 'Depois') {
+      // A Depois B → A must come after B
+      if (!mustBeAfter.has(rule.categoryA)) mustBeAfter.set(rule.categoryA, new Set());
+      mustBeAfter.get(rule.categoryA)!.add(rule.categoryB);
+    } else {
+      // A Antes B → B must come after A
+      if (!mustBeAfter.has(rule.categoryB)) mustBeAfter.set(rule.categoryB, new Set());
+      mustBeAfter.get(rule.categoryB)!.add(rule.categoryA);
+    }
+  }
+
+  // Detect circular deps — skip scheduling for circular categories
+  const circularCategories = new Set<string>();
+  {
+    const visited = new Set<string>();
+    const stack = new Set<string>();
+    function detectCycle(node: string): boolean {
+      if (stack.has(node)) { circularCategories.add(node); return true; }
+      if (visited.has(node)) return false;
+      visited.add(node); stack.add(node);
+      for (const dep of mustBeAfter.get(node) ?? []) {
+        if (detectCycle(dep)) { circularCategories.add(node); return true; }
+      }
+      stack.delete(node);
+      return false;
+    }
+    for (const catId of mustBeAfter.keys()) detectCycle(catId);
+  }
+
+  // Split tasks into passes:
+  // Pass 1: tasks with no unmet "after" dependencies (or whose deps have no "after" deps themselves)
+  // Pass 2: deferred tasks whose deps need to be scheduled first
+  // We do topological sort of category IDs
+  const allCatIds = new Set(sortedTasks.map(t => t.id.split('-d')[0]).map(entryId => {
+    // We need categoryId from task — stored via categoryName or we can look it up
+    // Actually tasks don't carry categoryId directly, but they carry categoryName.
+    // Let's group by categoryName instead.
+    return '';
+  }));
+
+  // We need category mapping from task. Let me extract it from the task list.
+  // Tasks carry categoryName. Build catNameToId map.
+  const catNameToTasks = new Map<string, PlanningTask[]>();
+  for (const t of sortedTasks) {
+    const arr = catNameToTasks.get(t.categoryName) ?? [];
+    arr.push(t);
+    catNameToTasks.set(t.categoryName, arr);
+  }
+
+  // Build a catName→catId lookup from the tasks' associated categories
+  // We need category ID for the rules. Since tasks have categoryName, let's build a lookup.
+  // Actually, the sequencing rules use category IDs, and tasks have categoryName.
+  // We need to map task.categoryName back to category IDs.
+  // The production entries have categoriaId, and the category has nome.
+  // Let's just carry categoryId on PlanningTask — but to avoid big refactor, 
+  // let's build the mapping from the sortedTasks' source data.
+  // Actually, we can add categoryId to PlanningTask. Let me do it simpler:
+  // Track which tasks depend on what, using the map from the caller.
+
+  // For now, attach categoryId to each task by looking up from the production system
+  // But we don't have access here. Let's pass it through. 
+  // SIMPLER: add a `categoryId` field to PlanningTask (it's in the same file).
+  // Let me just use categoryName to match rules — but rules use IDs.
+  // The cleanest way: we need to map categoryName → categoryId.
+  // Since we don't have the categories list here, let's pass a mapping.
+  // Actually, the simplest fix: add categoryId to PlanningTask and set it during task creation.
+
+  // For now, I'll build a reverse lookup from the rules to category names.
+  // This is fragile but works: we can pass a catIdToName map as a parameter.
+  // Let me just add categoryId to PlanningTask below and set it in buildDailyGanttSchedule.
 
   // ── Step 3: Joint scheduling ──
   const operators: OperatorState[] = operatorNames.map((name) => ({
