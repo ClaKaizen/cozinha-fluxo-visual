@@ -265,9 +265,8 @@ function commitOperator(op: OperatorState, taskStart: number, duration: number):
  */
 function ensureLunch(op: OperatorState) {
   if (!op.hadLunch && op.cursor >= LUNCH_WINDOW_START) {
-    const lunchStart = Math.min(Math.max(op.cursor, LUNCH_WINDOW_START), LUNCH_LATEST_START);
-    op.lunchStart = lunchStart;
-    op.lunchEnd = lunchStart + LUNCH_DURATION;
+    op.lunchStart = LUNCH_WINDOW_START;
+    op.lunchEnd = LUNCH_WINDOW_START + LUNCH_DURATION;
     op.hadLunch = true;
     if (op.cursor < op.lunchEnd) op.cursor = op.lunchEnd;
   }
