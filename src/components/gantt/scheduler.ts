@@ -284,6 +284,8 @@ function ensureLunch(op: OperatorState) {
 interface MachineSlotTracker {
   /** Per equipment ID: array of next-available times, one per machine instance */
   slots: Map<string, number[]>;
+  /** Dedicated machine reservations: key = `${categoryId}:${equipmentId}`, value = machineIdx */
+  dedicatedSlots: Map<string, number>;
 }
 
 function createMachineTracker(equipment: Equipment[], allowEmergency: boolean): MachineSlotTracker {
@@ -292,7 +294,7 @@ function createMachineTracker(equipment: Equipment[], allowEmergency: boolean): 
     const count = allowEmergency ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
     slots.set(eq.id, Array.from({ length: count }, () => DAY_START));
   });
-  return { slots };
+  return { slots, dedicatedSlots: new Map() };
 }
 
 /**
