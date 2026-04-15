@@ -326,7 +326,7 @@ export default function Configuracoes() {
                                 return (
                                   <Badge key={i} variant="outline" className="text-[10px] px-2 py-0 font-medium border"
                                     style={{ borderColor: exColor, color: exColor, backgroundColor: exColor + "15" }}>
-                                    {exEq?.nome || "?"} {extra.isFirst ? "1→" : extra.simultaneo ? "⚡" : "→"}
+                                    {exEq?.nome || "?"} {extra.isPaired ? "🔗" : extra.isFirst ? "1→" : extra.simultaneo ? "⚡" : "→"}{extra.roleLabel ? ` (${extra.roleLabel})` : ''}
                                   </Badge>
                                 );
                               })}
