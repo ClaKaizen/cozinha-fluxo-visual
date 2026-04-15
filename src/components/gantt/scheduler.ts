@@ -498,7 +498,7 @@ function jointSchedule(
   const unscheduledTasks: UnscheduledTask[] = [];
   const emergencyEquipmentNames = new Set<string>();
 
-  // Try scheduling: first without emergency, then with
+  // Try scheduling with dependency-aware min start times
   function tryScheduleAll(allowEmergency: boolean, tasksToSchedule: PlanningTask[]): PlanningTask[] {
     const tracker = createMachineTracker(equipment, allowEmergency);
 
@@ -515,7 +515,9 @@ function jointSchedule(
     const remaining: PlanningTask[] = [];
 
     for (const task of tasksToSchedule) {
-      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment);
+      // Apply sequencing constraint: get minimum start time based on dependencies
+      const depMinStart = getMinStartForTask(task);
+      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart);
       if (result) {
         // Commit machine slots
         for (const ma of result.machineAssignments) {
@@ -524,7 +526,7 @@ function jointSchedule(
         }
         // Commit operator
         const op = operators.find((o) => o.name === result.operatorName)!;
-        commitOperator(op, result.operatorStart, task.operatorDuration);
+        if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
 
         // Track emergency
         for (const ma of result.machineAssignments) {
@@ -533,6 +535,11 @@ function jointSchedule(
             emergencyEquipmentNames.add(eq.nome);
           }
         }
+
+        // Update category end times for dependency tracking
+        const maxMachineEnd = Math.max(...result.machineAssignments.map(ma => ma.end));
+        const prevEnd = scheduledCategoryEndTimes.get(task.categoryId) ?? 0;
+        scheduledCategoryEndTimes.set(task.categoryId, Math.max(prevEnd, maxMachineEnd));
 
         assignments.push(result);
       } else {
@@ -543,14 +550,23 @@ function jointSchedule(
     return remaining;
   }
 
-  // Phase 1: Normal machines only
-  let remaining = tryScheduleAll(false, sortedTasks);
+  // Pass 1: Schedule tasks with no unmet dependencies (normal machines)
+  let remaining = tryScheduleAll(false, pass1Tasks);
 
-  // Phase 2: Emergency machines for remaining tasks
+  // Pass 2: Schedule deferred tasks (dependencies now met)
+  if (deferredTasks.length > 0) {
+    remaining = [...remaining, ...tryScheduleAll(false, deferredTasks)];
+  }
+
+  // Schedule circular tasks normally (ignore circular deps)
+  if (circularTasks.length > 0) {
+    remaining = [...remaining, ...tryScheduleAll(false, circularTasks)];
+  }
+
+  // Phase with emergency machines for remaining tasks
   if (remaining.length > 0) {
     const hasEmergency = equipment.some((eq) => eq.quantidadeEmergencia > 0);
     if (hasEmergency) {
-      // Check if bottleneck is machines (operators free) or operators (machines free)
       const opsFree = operators.some((op) => op.totalWorked < OPERATOR_PRODUCTIVE_MINUTES - 10);
       if (opsFree) {
         remaining = tryScheduleAll(true, remaining);
