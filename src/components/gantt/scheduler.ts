@@ -32,6 +32,7 @@ export interface MachineBooking {
   equipmentName: string;
   duration: number;
   simultaneous: boolean;
+  isFirstPhase?: boolean;
   colorIndex: number;
   showSimultaneousBadge?: boolean;
   isSequentialPhase?: boolean;
@@ -347,9 +348,18 @@ function findEarliestMachineSlot(
  * Build sequential booking phases from a task's bookings.
  */
 function buildBookingPhases(task: PlanningTask): MachineBooking[][] {
-  const sequentialPhases = task.machineBookings.filter((b) => !b.simultaneous).map((b) => [b]);
-  const simultaneousPhase = task.machineBookings.filter((b) => b.simultaneous);
-  return simultaneousPhase.length > 0 ? [...sequentialPhases, simultaneousPhase] : sequentialPhases;
+  // Phase 1: "1º" (isFirstPhase) equipment — run first, in parallel if multiple
+  const firstPhase = task.machineBookings.filter((b) => b.isFirstPhase);
+  // Phase 2: primary + simultaneous equipment — run together after "1º" completes
+  const simultaneousPhase = task.machineBookings.filter((b) => b.simultaneous && !b.isFirstPhase);
+  // Phase 3: remaining sequential (neither 1º nor simultaneous)
+  const flexiblePhases = task.machineBookings.filter((b) => !b.simultaneous && !b.isFirstPhase).map((b) => [b]);
+
+  const phases: MachineBooking[][] = [];
+  if (firstPhase.length > 0) phases.push(firstPhase);
+  if (simultaneousPhase.length > 0) phases.push(simultaneousPhase);
+  phases.push(...flexiblePhases);
+  return phases;
 }
 
 // ── Joint scheduling result ──────────────────────────────
