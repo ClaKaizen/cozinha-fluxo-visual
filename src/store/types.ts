@@ -64,6 +64,13 @@ export interface TempOperator {
   hours: number;
 }
 
+export interface SequencingRule {
+  id: string;
+  categoryA: string;   // category ID
+  relation: 'Antes' | 'Depois';
+  categoryB: string;   // category ID
+}
+
 export const BREAK_COEFFICIENT = 0.0625;
 export const INEFFICIENCY_FACTOR = 1.20;
 export const EFFECTIVE_HOURS = 8; // Direct 8h per operator
