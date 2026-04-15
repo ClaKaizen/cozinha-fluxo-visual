@@ -36,6 +36,8 @@ export interface MachineBooking {
   colorIndex: number;
   showSimultaneousBadge?: boolean;
   isSequentialPhase?: boolean;
+  isDedicated?: boolean;
+  roleLabel?: string;
 }
 
 export interface PlanningTask {
@@ -64,6 +66,8 @@ export interface MachineTask extends PlanningTask {
   isSequentialPhase: boolean;
   isFirstPhase: boolean;
   isLunchSafe: boolean;
+  isDedicated: boolean;
+  roleLabel: string;
 }
 
 export interface OperatorTask extends PlanningTask {
@@ -280,6 +284,8 @@ function ensureLunch(op: OperatorState) {
 interface MachineSlotTracker {
   /** Per equipment ID: array of next-available times, one per machine instance */
   slots: Map<string, number[]>;
+  /** Dedicated machine reservations: key = `${categoryId}:${equipmentId}`, value = machineIdx */
+  dedicatedSlots: Map<string, number>;
 }
 
 function createMachineTracker(equipment: Equipment[], allowEmergency: boolean): MachineSlotTracker {
@@ -288,7 +294,7 @@ function createMachineTracker(equipment: Equipment[], allowEmergency: boolean): 
     const count = allowEmergency ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
     slots.set(eq.id, Array.from({ length: count }, () => DAY_START));
   });
-  return { slots };
+  return { slots, dedicatedSlots: new Map() };
 }
 
 /**
@@ -302,6 +308,7 @@ function findEarliestMachineSlot(
   equipmentMap: Map<string, Equipment>,
   allowEmergency: boolean,
   hardStop: number,
+  categoryId?: string,
 ): { assignments: { booking: MachineBooking; machineIdx: number; start: number; end: number }[]; phaseStart: number } | null {
   // Group bookings by equipment
   const grouped = new Map<string, MachineBooking[]>();
@@ -309,6 +316,16 @@ function findEarliestMachineSlot(
     const arr = grouped.get(b.equipmentId) ?? [];
     arr.push(b);
     grouped.set(b.equipmentId, arr);
+  });
+
+  // Collect all dedicated machine indices that are reserved by OTHER categories
+  const reservedByOthers = new Set<string>(); // "eqId:machIdx"
+  tracker.dedicatedSlots.forEach((machIdx, key) => {
+    const [resCatId] = key.split(":");
+    if (resCatId !== categoryId) {
+      const eqId = key.split(":")[1];
+      reservedByOthers.add(`${eqId}:${machIdx}`);
+    }
   });
 
   // For each equipment group, find the N earliest-available slots
@@ -323,15 +340,33 @@ function findEarliestMachineSlot(
     const maxIdx = allowEmergency ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
     if (maxIdx < bookings.length) return null;
 
-    // Get indices sorted by availability (earliest-free first)
-    const availableIndices = Array.from({ length: maxIdx }, (_, i) => i)
-      .sort((a, b) => (slots[a] ?? DAY_START) - (slots[b] ?? DAY_START));
-
     for (let bi = 0; bi < bookings.length; bi++) {
-      const idx = availableIndices[bi];
-      const slotAvail = Math.max(slots[idx] ?? DAY_START, minStart);
-      if (slotAvail > phaseStart) phaseStart = slotAvail;
-      slotPicks.push({ equipmentId: eqId, booking: bookings[bi], machineIdx: idx });
+      const booking = bookings[bi];
+
+      // Check if this booking's category already has a dedicated slot reserved
+      const dedicatedKey = `${categoryId}:${eqId}`;
+      const existingDedicated = booking.isDedicated && categoryId ? tracker.dedicatedSlots.get(dedicatedKey) : undefined;
+
+      if (existingDedicated !== undefined) {
+        // Reuse the same dedicated machine
+        const slotAvail = Math.max(slots[existingDedicated] ?? DAY_START, minStart);
+        if (slotAvail > phaseStart) phaseStart = slotAvail;
+        slotPicks.push({ equipmentId: eqId, booking, machineIdx: existingDedicated });
+      } else {
+        // Get indices sorted by availability (earliest-free first), excluding reserved-by-others
+        const availableIndices = Array.from({ length: maxIdx }, (_, i) => i)
+          .filter(i => !reservedByOthers.has(`${eqId}:${i}`))
+          .sort((a, b) => (slots[a] ?? DAY_START) - (slots[b] ?? DAY_START));
+
+        // Skip indices already picked
+        const alreadyPicked = slotPicks.filter(p => p.equipmentId === eqId).map(p => p.machineIdx);
+        const idx = availableIndices.find(i => !alreadyPicked.includes(i));
+        if (idx === undefined) return null;
+
+        const slotAvail = Math.max(slots[idx] ?? DAY_START, minStart);
+        if (slotAvail > phaseStart) phaseStart = slotAvail;
+        slotPicks.push({ equipmentId: eqId, booking, machineIdx: idx });
+      }
     }
   }
 
@@ -560,10 +595,17 @@ function jointSchedule(
 
       const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp, lunchSafeCategories);
       if (result) {
-        // Commit machine slots
+        // Commit machine slots and register dedicated machines
         for (const ma of result.machineAssignments) {
           const slots = tracker.slots.get(ma.booking.equipmentId);
           if (slots) slots[ma.machineIdx] = ma.end;
+          // Register dedicated machine assignment
+          if (ma.booking.isDedicated) {
+            const dedKey = `${task.categoryId}:${ma.booking.equipmentId}`;
+            if (!tracker.dedicatedSlots.has(dedKey)) {
+              tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
+            }
+          }
         }
 
         // Commit operator: each dose gets its own small T.Homem block
@@ -661,7 +703,7 @@ function tryJointSlot(
 
   for (let iter = 0; iter < MAX_ITERATIONS && candidateTime < OPERATOR_HARD_STOP; iter++) {
     // Try to schedule all machine phases atomically starting at candidateTime
-    const machineResult = tryAllPhases(phases, candidateTime, tracker, equipmentMap, allowEmergency);
+    const machineResult = tryAllPhases(phases, candidateTime, tracker, equipmentMap, allowEmergency, task.categoryId);
     if (!machineResult) {
       // No machine slot available at all
       candidateTime += 5;
@@ -790,21 +832,23 @@ function tryAllPhases(
   tracker: MachineSlotTracker,
   equipmentMap: Map<string, Equipment>,
   allowEmergency: boolean,
+  categoryId?: string,
 ): { allAssignments: { booking: MachineBooking; machineIdx: number; start: number; end: number }[]; overallStart: number } | null {
   // Clone tracker for speculative scheduling
   const specSlots = new Map<string, number[]>();
   tracker.slots.forEach((slots, key) => specSlots.set(key, [...slots]));
-  const specTracker: MachineSlotTracker = { slots: specSlots };
+  const specDedicated = new Map(tracker.dedicatedSlots);
+  const specTracker: MachineSlotTracker = { slots: specSlots, dedicatedSlots: specDedicated };
 
   const allAssignments: { booking: MachineBooking; machineIdx: number; start: number; end: number }[] = [];
   let phaseCursor = minStart;
   let overallStart = Infinity;
 
   for (const phaseBookings of phases) {
-    const result = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, MACHINE_TARGET_STOP);
+    const result = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, MACHINE_TARGET_STOP, categoryId);
     if (!result) {
       // Try with overflow allowed (past hard stop)
-      const overflowResult = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, Infinity);
+      const overflowResult = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, Infinity, categoryId);
       if (!overflowResult) return null;
       // Mark as overflow but still return
       for (const a of overflowResult.assignments) {
@@ -870,9 +914,11 @@ function buildGanttFromAssignments(
       if (!eq) continue;
 
       const isEmergencyMachine = ma.machineIdx >= eq.quantidade;
-      const label = isEmergencyMachine
+      const isDedicatedMachine = Boolean(ma.booking.isDedicated);
+      let label = isEmergencyMachine
         ? `${ma.booking.equipmentName} ${ma.machineIdx + 1} ⚠️`
         : `${ma.booking.equipmentName} ${ma.machineIdx + 1}`;
+      if (isDedicatedMachine) label += " 🔒";
 
       const isOverflow = ma.start >= MACHINE_TARGET_STOP;
       const segments: TimelineSegment[] = [{
@@ -896,6 +942,8 @@ function buildGanttFromAssignments(
         isSequentialPhase: Boolean(ma.booking.isSequentialPhase),
         isFirstPhase: Boolean(ma.booking.isFirstPhase),
         isLunchSafe: lunchSafeCategories.includes(task.categoryId),
+        isDedicated: Boolean(ma.booking.isDedicated),
+        roleLabel: ma.booking.roleLabel ?? "",
       };
 
       machineTasksForThisAssignment.push(mt);
@@ -1099,6 +1147,8 @@ export function buildDailyGanttSchedule({
               isFirstPhase,
               colorIndex: (extra.simultaneo && !isFirstPhase) ? primaryColorIndex : (equipmentIndex.get(extraEq.id) ?? 0) % 6,
               isSequentialPhase: !extra.simultaneo && !isFirstPhase,
+              isDedicated: extra.isDedicated ?? false,
+              roleLabel: extra.roleLabel ?? "",
             });
           }
         }

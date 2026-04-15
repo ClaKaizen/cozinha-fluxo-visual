@@ -12,6 +12,8 @@ export interface CategoryEquipmentEntry {
   tempoCicloMaquina1?: number;
   simultaneo: boolean;
   isFirst?: boolean;
+  isDedicated?: boolean;
+  roleLabel?: string;
 }
 
 export interface Category {

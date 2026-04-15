@@ -64,6 +64,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
   }
 
   const isEmergencyRowFn = (label: string) => label.includes("⚠️");
+  const isDedicatedRowFn = (label: string) => label.includes("🔒");
 
   const labelWidth = 148;
   const rowHeight = 42;
@@ -104,6 +105,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
               ))}
               {rows.map((row) => {
                 const isEmergency = isEmergencyRowFn(row.label);
+                const isDedicated = isDedicatedRowFn(row.label);
                 const rowLunch = rowLunchBreaks?.[row.label];
                 const lunchLeft = rowLunch ? toPercent(rowLunch.start) : 0;
                 const lunchWidth = rowLunch ? ((rowLunch.end - rowLunch.start) / totalSpan) * 100 : 0;
@@ -113,8 +115,13 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                   <div className="truncate pr-3 text-xs font-semibold text-foreground flex items-center gap-1" style={{ width: labelWidth }}>
                     {isEmergency ? (
                       <>
-                        <span>{row.label.replace(" ⚠️", "")}</span>
+                        <span>{row.label.replace(" ⚠️", "").replace(" 🔒", "")}</span>
                         <span className="inline-flex items-center rounded border border-orange-400 bg-orange-100 dark:bg-orange-900/40 px-1 py-0 text-[8px] font-bold text-orange-700 dark:text-orange-300 leading-tight">Emerg.</span>
+                      </>
+                    ) : isDedicated ? (
+                      <>
+                        <span>{row.label.replace(" 🔒", "")}</span>
+                        <span className="text-[10px]" title="Máquina dedicada">🔒</span>
                       </>
                     ) : row.label}
                   </div>
@@ -137,6 +144,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                         const showLabel = widthPx > 30;
                         const showTime = widthPx > 60;
                         const isOverflow = seg.overflow;
+                        const roleLabel = (task as unknown as MachineTask).roleLabel;
                         const labelPrefix = isOverflow ? `⚠ ` : `${(task as unknown as MachineTask).isFirstPhase ? "1→ " : (task as unknown as MachineTask).isSequentialPhase ? "→ " : task.showSimultaneousBadge ? "⊗ " : ""}${(task as unknown as MachineTask).isLunchSafe && rowLunch && seg.end > rowLunch.start && seg.start < rowLunch.end ? "🍽 " : ""}`;
                         return (
                           <div
@@ -153,10 +161,10 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                                 borderStyle: (task as unknown as MachineTask).isEmergencyMachine ? "dashed" : "solid",
                               }),
                             }}
-                            title={`${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`}
+                            title={`${task.doseLabel}${roleLabel ? ` — ${roleLabel}` : ''} ${formatClock(task.start)}–${formatClock(task.end)}${(task as unknown as MachineTask).isDedicated ? `\nDedicada a: ${roleLabel || task.artigo}` : ''}`}
                           >
                             {showLabel && (
-                              <span className="truncate leading-tight">{labelPrefix}{task.artigo}</span>
+                              <span className="truncate leading-tight">{labelPrefix}{task.artigo}{roleLabel ? ` — ${roleLabel}` : ''}</span>
                             )}
                             {showTime && (
                               <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">
