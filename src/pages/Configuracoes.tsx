@@ -18,7 +18,7 @@ const EQUIPMENT_COLORS = [
 export default function Configuracoes() {
   const store = useStore();
 
-  const [eqForm, setEqForm] = useState({ nome: "", quantidade: "", quantidadeEmergencia: "" });
+  const [eqForm, setEqForm] = useState({ nome: "", quantidade: "", quantidadeEmergencia: "", operatorsPerGroup: "1" });
   const [editEq, setEditEq] = useState<string | null>(null);
 
   const [catForm, setCatForm] = useState({
@@ -39,8 +39,9 @@ export default function Configuracoes() {
         nome: eqForm.nome.trim(),
         quantidade: Number(eqForm.quantidade) || 1,
         quantidadeEmergencia: Number(eqForm.quantidadeEmergencia) || 0,
+        operatorsPerGroup: Math.max(1, Number(eqForm.operatorsPerGroup) || 1),
       });
-      setEqForm({ nome: "", quantidade: "", quantidadeEmergencia: "" });
+      setEqForm({ nome: "", quantidade: "", quantidadeEmergencia: "", operatorsPerGroup: "1" });
     }
   };
 
@@ -49,9 +50,10 @@ export default function Configuracoes() {
       nome: eqForm.nome,
       quantidade: Number(eqForm.quantidade) || 1,
       quantidadeEmergencia: Number(eqForm.quantidadeEmergencia) || 0,
+      operatorsPerGroup: Math.max(1, Number(eqForm.operatorsPerGroup) || 1),
     });
     setEditEq(null);
-    setEqForm({ nome: "", quantidade: "", quantidadeEmergencia: "" });
+    setEqForm({ nome: "", quantidade: "", quantidadeEmergencia: "", operatorsPerGroup: "1" });
   };
 
   const handleAddCat = () => {
