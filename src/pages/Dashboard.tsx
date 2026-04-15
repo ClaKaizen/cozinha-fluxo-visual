@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { ShiftCode } from "@/store/types";
 import GanttChart from "@/components/GanttChart";
+import MachineSequence from "@/components/dashboard/MachineSequence";
+import OperatorSequence from "@/components/dashboard/OperatorSequence";
 import { buildDailyGanttSchedule, normalizeDateKey } from "@/components/gantt/scheduler";
 
 const SHIFT_OPTIONS: ShiftCode[] = ['D', 'E', 'I', 'C'];
@@ -390,8 +392,8 @@ export default function Dashboard() {
                             <td className="px-2 py-1 text-right">{p.quantidade}</td>
                             <td className="px-2 py-1">{p.unidade || "-"}</td>
                             <td className="px-2 py-1">{p.cat?.nome || "-"}</td>
-                            <td className="px-2 py-1 text-right">{p.cat ? `${p.quantidade * p.cat.tempoCicloHomem} min` : "-"}</td>
-                            <td className="px-2 py-1 text-right">{p.cat ? `${p.quantidade * p.cat.tempoCicloMaquina} min` : "-"}</td>
+                            <td className="px-2 py-1 text-right">{p.cat ? `${Math.round(p.quantidade * p.cat.tempoCicloHomem)} min` : "-"}</td>
+                            <td className="px-2 py-1 text-right">{p.cat ? `${Math.round(p.quantidade * p.cat.tempoCicloMaquina)} min` : "-"}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -403,6 +405,10 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Sequence subsections */}
+      <MachineSequence schedule={schedule} />
+      <OperatorSequence schedule={schedule} operatorHoursMap={operatorHoursMap} />
 
       {/* Gantt Chart */}
       <GanttChart schedule={schedule} />
