@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, Trash2, Edit2, Save, X, Wrench, Tag, User, Cog, AlertTriangle, ListOrdered, UtensilsCrossed } from "lucide-react";
+import { Plus, Trash2, Edit2, Save, X, Wrench, Tag, User, Cog, AlertTriangle, ListOrdered, UtensilsCrossed, Lock } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -96,7 +96,7 @@ export default function Configuracoes() {
   const addExtraEquipment = () => {
     setCatForm(f => ({
       ...f,
-      equipamentos: [...f.equipamentos, { equipamentoId: "", tempoCicloMaquina: 0, tempoCicloMaquina1: undefined, simultaneo: false, isFirst: false }],
+      equipamentos: [...f.equipamentos, { equipamentoId: "", tempoCicloMaquina: 0, tempoCicloMaquina1: undefined, simultaneo: false, isFirst: false, isDedicated: false, roleLabel: "" }],
     }));
   };
 
@@ -276,6 +276,10 @@ export default function Configuracoes() {
                                   <Label className="text-[10px]">T.Máq Seg.</Label>
                                   <Input type="number" value={entry.tempoCicloMaquina} onChange={(e) => updateExtraEquipment(idx, { tempoCicloMaquina: Number(e.target.value) || 0 })} className={inputCls} placeholder="min" />
                                 </div>
+                                <div className="w-28">
+                                  <Label className="text-[10px]">Função</Label>
+                                  <Input value={entry.roleLabel ?? ""} onChange={(e) => updateExtraEquipment(idx, { roleLabel: e.target.value })} className={inputCls} placeholder="ex: Arrefecimento" />
+                                </div>
                                 <div className="flex items-center gap-1">
                                   <Switch checked={entry.isFirst ?? false} onCheckedChange={(v) => updateExtraEquipment(idx, { isFirst: v, simultaneo: v ? false : entry.simultaneo })} />
                                   <Label className="text-[10px]">1º</Label>
@@ -283,6 +287,10 @@ export default function Configuracoes() {
                                 <div className="flex items-center gap-1">
                                   <Switch checked={entry.simultaneo} onCheckedChange={(v) => updateExtraEquipment(idx, { simultaneo: v, isFirst: v ? false : (entry.isFirst ?? false) })} />
                                   <Label className="text-[10px]">Simult.</Label>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Switch checked={entry.isDedicated ?? false} onCheckedChange={(v) => updateExtraEquipment(idx, { isDedicated: v })} />
+                                  <Label className="text-[10px] flex items-center gap-0.5"><Lock className="h-2.5 w-2.5" />Dedicado</Label>
                                 </div>
                                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => removeExtraEquipment(idx)}>
                                   <Trash2 className="h-3 w-3 text-destructive" />
