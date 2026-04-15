@@ -1060,7 +1060,7 @@ export function buildDailyGanttSchedule({
   const allOpNames = [...operatorNames, ...tempOpsForDate.map((t) => t.nome)];
 
   // Run joint optimizer
-  const result = jointSchedule(tasks, equipment, equipmentMap, allOpNames);
+  const result = jointSchedule(tasks, equipment, equipmentMap, allOpNames, sequencingRules ?? []);
 
   // Validate
   validateSchedule(result.assignments);
