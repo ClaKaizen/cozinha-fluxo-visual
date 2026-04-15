@@ -817,6 +817,7 @@ function buildGanttFromAssignments(
   unscheduledTasks: UnscheduledTask[],
   emergencyEquipmentNames: Set<string>,
   staffingWarning: string | null,
+  lunchSafeCategories: string[] = [],
 ): Omit<DailyGanttSchedule, 'tasks' | 'lunchStart' | 'lunchEnd'> {
   const machineRowsMap = new Map<string, GanttRow<MachineTask>>();
   const operatorRowsMap = new Map<string, GanttRow<OperatorTask>>(
@@ -866,6 +867,7 @@ function buildGanttFromAssignments(
         showSimultaneousBadge: Boolean(ma.booking.showSimultaneousBadge),
         isSequentialPhase: Boolean(ma.booking.isSequentialPhase),
         isFirstPhase: Boolean(ma.booking.isFirstPhase),
+        isLunchSafe: lunchSafeCategories.includes(task.categoryId),
       };
 
       machineTasksForThisAssignment.push(mt);
