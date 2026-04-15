@@ -339,16 +339,11 @@ function formatMachineInstanceLabel(
   equipmentName: string,
   machineIdx: number,
   normalCount: number,
-  options?: { paired?: boolean; dedicated?: boolean },
+  _options?: { paired?: boolean; dedicated?: boolean },
 ): string {
-  let label = machineIdx >= normalCount
+  return machineIdx >= normalCount
     ? `${equipmentName} ${machineIdx + 1} ⚠️`
     : `${equipmentName} ${machineIdx + 1}`;
-
-  if (options?.paired) label += " 🔗";
-  else if (options?.dedicated) label += " 🔒";
-
-  return label;
 }
 
 /**
