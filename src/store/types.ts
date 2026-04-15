@@ -10,6 +10,7 @@ export interface CategoryEquipmentEntry {
   tempoCicloMaquina: number;
   tempoCicloMaquina1?: number;
   simultaneo: boolean;
+  isFirst?: boolean;
 }
 
 export interface Category {
