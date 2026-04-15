@@ -876,8 +876,8 @@ function buildGanttFromAssignments(
       machineRowsMap.get(label)!.tasks.push(mt);
     }
 
-    // Create operator task
-    if (operatorName && task.operatorDuration > 0) {
+    // Create operator task — skip if this dose's operator work is covered by grouping (zero-duration)
+    if (operatorName && task.operatorDuration > 0 && operatorStart < operatorEnd) {
       const opState = operatorStates.find((o) => o.name === operatorName);
       const opLunchStart = opState?.lunchStart ?? LUNCH_LATEST_START;
       const opLunchEnd = opState?.lunchEnd ?? LUNCH_LATEST_START + LUNCH_DURATION;
