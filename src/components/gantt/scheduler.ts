@@ -172,24 +172,18 @@ function operatorIsFreeAt(op: OperatorState, start: number, duration: number): b
 
   let effectiveStart = Math.max(op.cursor, start);
 
-  // If we haven't had lunch and the task would overlap or push past lunch constraints
   if (!op.hadLunch) {
-    // If we're in the lunch window and haven't eaten, we must eat first
-    if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < op.lunchEnd) {
-      // Can we eat now (before LUNCH_LATEST_START)?
-      const lunchStart = Math.max(effectiveStart, LUNCH_WINDOW_START);
-      if (lunchStart > LUNCH_LATEST_START) return false; // too late for lunch
-      effectiveStart = lunchStart + LUNCH_DURATION;
-    }
-    // If the task would end past LUNCH_LATEST_START and we haven't eaten
-    if (effectiveStart + duration > LUNCH_LATEST_START && effectiveStart < LUNCH_WINDOW_START) {
-      // Task runs past 13:00 but starts before 12:00 - that's fine, lunch after
-      // But the task end must not prevent lunch by 13:00
-      // Actually: if task ends after LUNCH_LATEST_START, operator must eat first
-      // Only if task would push lunch start past 13:00
+    if (effectiveStart < LUNCH_WINDOW_START) {
+      const taskEnd = effectiveStart + duration;
+      if (taskEnd > LUNCH_LATEST_START) {
+        // Task would end after 13:00 — must eat lunch first at 12:00
+        effectiveStart = LUNCH_WINDOW_START + LUNCH_DURATION;
+      }
+    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < LUNCH_LATEST_START + LUNCH_DURATION) {
+      const lunchStart = Math.min(Math.max(op.cursor, LUNCH_WINDOW_START), LUNCH_LATEST_START);
+      effectiveStart = Math.max(effectiveStart, lunchStart + LUNCH_DURATION);
     }
   } else {
-    // Already had lunch - skip lunch window
     if (effectiveStart >= op.lunchStart && effectiveStart < op.lunchEnd) {
       effectiveStart = op.lunchEnd;
     }
@@ -210,26 +204,18 @@ function getOperatorEarliestStart(op: OperatorState, minStart: number, duration:
   let effectiveStart = Math.max(op.cursor, minStart);
 
   if (!op.hadLunch) {
-    // Before lunch window: check if task would push lunch past 13:00
     if (effectiveStart < LUNCH_WINDOW_START) {
       const taskEnd = effectiveStart + duration;
       if (taskEnd > LUNCH_LATEST_START) {
-        // Task would end after 13:00 - must eat lunch first at latest 13:00
-        // But lunch window hasn't started, so push task to after lunch
-        // Schedule lunch at LUNCH_WINDOW_START (earliest)
+        // Task would end after 13:00 — eat lunch at 12:00 first
         effectiveStart = LUNCH_WINDOW_START + LUNCH_DURATION;
-      } else if (taskEnd > LUNCH_WINDOW_START) {
-        // Task ends between 12:00 and 13:00 - OK, lunch after task
-        // Fine as-is
       }
-      // else task ends before 12:00 - fine
     } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < LUNCH_LATEST_START + LUNCH_DURATION) {
-      // We're in the lunch window - must eat first
-      const lunchStart = Math.min(Math.max(effectiveStart, LUNCH_WINDOW_START), LUNCH_LATEST_START);
-      effectiveStart = lunchStart + LUNCH_DURATION;
+      // In the lunch window — compute lunch from operator cursor
+      const lunchStart = Math.min(Math.max(op.cursor, LUNCH_WINDOW_START), LUNCH_LATEST_START);
+      effectiveStart = Math.max(effectiveStart, lunchStart + LUNCH_DURATION);
     }
   } else {
-    // Already had lunch - skip lunch window
     if (effectiveStart >= op.lunchStart && effectiveStart < op.lunchEnd) {
       effectiveStart = op.lunchEnd;
     }
@@ -249,20 +235,20 @@ function commitOperator(op: OperatorState, taskStart: number, duration: number):
     if (effectiveStart < LUNCH_WINDOW_START) {
       const taskEnd = effectiveStart + duration;
       if (taskEnd > LUNCH_LATEST_START) {
-        // Must eat lunch first
+        // Task would end after 13:00 — must eat lunch first at 12:00
         op.lunchStart = LUNCH_WINDOW_START;
         op.lunchEnd = LUNCH_WINDOW_START + LUNCH_DURATION;
         op.hadLunch = true;
         effectiveStart = op.lunchEnd;
       }
       // If taskEnd is between 12:00 and 13:00, task runs first, lunch after
-    } else if (effectiveStart >= LUNCH_WINDOW_START) {
-      // In lunch window - eat first
-      const lunchStart = Math.min(Math.max(effectiveStart, LUNCH_WINDOW_START), LUNCH_LATEST_START);
+    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < LUNCH_LATEST_START + LUNCH_DURATION) {
+      // In the lunch window — eat at the earliest valid time (operator cursor or now)
+      const lunchStart = Math.min(Math.max(op.cursor, LUNCH_WINDOW_START), LUNCH_LATEST_START);
       op.lunchStart = lunchStart;
       op.lunchEnd = lunchStart + LUNCH_DURATION;
       op.hadLunch = true;
-      effectiveStart = op.lunchEnd;
+      effectiveStart = Math.max(effectiveStart, op.lunchEnd);
     }
   } else {
     if (effectiveStart >= op.lunchStart && effectiveStart < op.lunchEnd) {
