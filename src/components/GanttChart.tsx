@@ -137,6 +137,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                         const showLabel = widthPx > 30;
                         const showTime = widthPx > 60;
                         const isOverflow = seg.overflow;
+                        const roleLabel = (task as unknown as MachineTask).roleLabel;
                         const labelPrefix = isOverflow ? `⚠ ` : `${(task as unknown as MachineTask).isFirstPhase ? "1→ " : (task as unknown as MachineTask).isSequentialPhase ? "→ " : task.showSimultaneousBadge ? "⊗ " : ""}${(task as unknown as MachineTask).isLunchSafe && rowLunch && seg.end > rowLunch.start && seg.start < rowLunch.end ? "🍽 " : ""}`;
                         return (
                           <div

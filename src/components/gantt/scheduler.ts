@@ -914,9 +914,11 @@ function buildGanttFromAssignments(
       if (!eq) continue;
 
       const isEmergencyMachine = ma.machineIdx >= eq.quantidade;
-      const label = isEmergencyMachine
+      const isDedicatedMachine = Boolean(ma.booking.isDedicated);
+      let label = isEmergencyMachine
         ? `${ma.booking.equipmentName} ${ma.machineIdx + 1} ⚠️`
         : `${ma.booking.equipmentName} ${ma.machineIdx + 1}`;
+      if (isDedicatedMachine) label += " 🔒";
 
       const isOverflow = ma.start >= MACHINE_TARGET_STOP;
       const segments: TimelineSegment[] = [{
