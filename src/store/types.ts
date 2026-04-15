@@ -13,6 +13,7 @@ export interface CategoryEquipmentEntry {
   simultaneo: boolean;
   isFirst?: boolean;
   isDedicated?: boolean;
+  isPaired?: boolean;
   roleLabel?: string;
 }
 

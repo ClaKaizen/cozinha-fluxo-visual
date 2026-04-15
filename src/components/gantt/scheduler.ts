@@ -37,6 +37,7 @@ export interface MachineBooking {
   showSimultaneousBadge?: boolean;
   isSequentialPhase?: boolean;
   isDedicated?: boolean;
+  isPaired?: boolean;
   roleLabel?: string;
 }
 
@@ -67,6 +68,7 @@ export interface MachineTask extends PlanningTask {
   isFirstPhase: boolean;
   isLunchSafe: boolean;
   isDedicated: boolean;
+  isPaired: boolean;
   roleLabel: string;
 }
 
@@ -318,12 +320,13 @@ function findEarliestMachineSlot(
     grouped.set(b.equipmentId, arr);
   });
 
-  // Collect all dedicated machine indices that are reserved by OTHER categories
+  // Collect all dedicated/paired machine indices that are reserved by OTHER categories
   const reservedByOthers = new Set<string>(); // "eqId:machIdx"
   tracker.dedicatedSlots.forEach((machIdx, key) => {
-    const [resCatId] = key.split(":");
+    const parts = key.split(":");
+    const resCatId = parts[0];
+    const eqId = parts[1];
     if (resCatId !== categoryId) {
-      const eqId = key.split(":")[1];
       reservedByOthers.add(`${eqId}:${machIdx}`);
     }
   });
@@ -343,15 +346,29 @@ function findEarliestMachineSlot(
     for (let bi = 0; bi < bookings.length; bi++) {
       const booking = bookings[bi];
 
-      // Check if this booking's category already has a dedicated slot reserved
-      const dedicatedKey = `${categoryId}:${eqId}`;
-      const existingDedicated = booking.isDedicated && categoryId ? tracker.dedicatedSlots.get(dedicatedKey) : undefined;
+      // Check if this booking's category already has a dedicated/paired slot reserved
+      const dedicatedKey = booking.isPaired
+        ? `${categoryId}:${eqId}:paired`
+        : booking.isDedicated
+          ? `${categoryId}:${eqId}:ded`
+          : undefined;
+      // Also check primary-paired reservation
+      const primaryPairedKey = `${categoryId}:${eqId}:primary-paired`;
+      const existingDedicated = dedicatedKey && categoryId ? tracker.dedicatedSlots.get(dedicatedKey) : undefined;
+      const existingPrimaryPaired = (!booking.isPaired && !booking.isDedicated && categoryId)
+        ? tracker.dedicatedSlots.get(primaryPairedKey)
+        : undefined;
 
       if (existingDedicated !== undefined) {
-        // Reuse the same dedicated machine
+        // Reuse the same dedicated/paired machine
         const slotAvail = Math.max(slots[existingDedicated] ?? DAY_START, minStart);
         if (slotAvail > phaseStart) phaseStart = slotAvail;
         slotPicks.push({ equipmentId: eqId, booking, machineIdx: existingDedicated });
+      } else if (existingPrimaryPaired !== undefined) {
+        // Reuse the same primary machine that's part of a pair
+        const slotAvail = Math.max(slots[existingPrimaryPaired] ?? DAY_START, minStart);
+        if (slotAvail > phaseStart) phaseStart = slotAvail;
+        slotPicks.push({ equipmentId: eqId, booking, machineIdx: existingPrimaryPaired });
       } else {
         // Get indices sorted by availability (earliest-free first), excluding reserved-by-others
         const availableIndices = Array.from({ length: maxIdx }, (_, i) => i)
@@ -595,15 +612,23 @@ function jointSchedule(
 
       const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp, lunchSafeCategories);
       if (result) {
-        // Commit machine slots and register dedicated machines
+        // Commit machine slots and register dedicated/paired machines
+        const hasPairedBooking = result.machineAssignments.some(ma => ma.booking.isPaired);
         for (const ma of result.machineAssignments) {
           const slots = tracker.slots.get(ma.booking.equipmentId);
           if (slots) slots[ma.machineIdx] = ma.end;
           // Register dedicated machine assignment
-          if (ma.booking.isDedicated) {
-            const dedKey = `${task.categoryId}:${ma.booking.equipmentId}`;
+          if (ma.booking.isDedicated || ma.booking.isPaired) {
+            const dedKey = `${task.categoryId}:${ma.booking.equipmentId}:${ma.booking.isPaired ? 'paired' : 'ded'}`;
             if (!tracker.dedicatedSlots.has(dedKey)) {
               tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
+            }
+          }
+          // When isPaired, also lock the primary machine as dedicated for this category
+          if (hasPairedBooking && !ma.booking.isPaired && !ma.booking.isDedicated) {
+            const primaryDedKey = `${task.categoryId}:${ma.booking.equipmentId}:primary-paired`;
+            if (!tracker.dedicatedSlots.has(primaryDedKey)) {
+              tracker.dedicatedSlots.set(primaryDedKey, ma.machineIdx);
             }
           }
         }
@@ -915,10 +940,12 @@ function buildGanttFromAssignments(
 
       const isEmergencyMachine = ma.machineIdx >= eq.quantidade;
       const isDedicatedMachine = Boolean(ma.booking.isDedicated);
+      const isPairedMachine = Boolean(ma.booking.isPaired);
       let label = isEmergencyMachine
         ? `${ma.booking.equipmentName} ${ma.machineIdx + 1} ⚠️`
         : `${ma.booking.equipmentName} ${ma.machineIdx + 1}`;
-      if (isDedicatedMachine) label += " 🔒";
+      if (isPairedMachine) label += " 🔗";
+      else if (isDedicatedMachine) label += " 🔒";
 
       const isOverflow = ma.start >= MACHINE_TARGET_STOP;
       const segments: TimelineSegment[] = [{
@@ -943,6 +970,7 @@ function buildGanttFromAssignments(
         isFirstPhase: Boolean(ma.booking.isFirstPhase),
         isLunchSafe: lunchSafeCategories.includes(task.categoryId),
         isDedicated: Boolean(ma.booking.isDedicated),
+        isPaired: Boolean(ma.booking.isPaired),
         roleLabel: ma.booking.roleLabel ?? "",
       };
 
@@ -1148,6 +1176,7 @@ export function buildDailyGanttSchedule({
               colorIndex: (extra.simultaneo && !isFirstPhase) ? primaryColorIndex : (equipmentIndex.get(extraEq.id) ?? 0) % 6,
               isSequentialPhase: !extra.simultaneo && !isFirstPhase,
               isDedicated: extra.isDedicated ?? false,
+              isPaired: extra.isPaired ?? false,
               roleLabel: extra.roleLabel ?? "",
             });
           }

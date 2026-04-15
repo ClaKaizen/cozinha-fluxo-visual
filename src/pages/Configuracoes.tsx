@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, Trash2, Edit2, Save, X, Wrench, Tag, User, Cog, AlertTriangle, ListOrdered, UtensilsCrossed, Lock } from "lucide-react";
+import { Plus, Trash2, Edit2, Save, X, Wrench, Tag, User, Cog, AlertTriangle, ListOrdered, UtensilsCrossed, Lock, Link } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -96,7 +96,7 @@ export default function Configuracoes() {
   const addExtraEquipment = () => {
     setCatForm(f => ({
       ...f,
-      equipamentos: [...f.equipamentos, { equipamentoId: "", tempoCicloMaquina: 0, tempoCicloMaquina1: undefined, simultaneo: false, isFirst: false, isDedicated: false, roleLabel: "" }],
+      equipamentos: [...f.equipamentos, { equipamentoId: "", tempoCicloMaquina: 0, tempoCicloMaquina1: undefined, simultaneo: false, isFirst: false, isDedicated: false, isPaired: false, roleLabel: "" }],
     }));
   };
 
@@ -292,6 +292,10 @@ export default function Configuracoes() {
                                   <Switch checked={entry.isDedicated ?? false} onCheckedChange={(v) => updateExtraEquipment(idx, { isDedicated: v })} />
                                   <Label className="text-[10px] flex items-center gap-0.5"><Lock className="h-2.5 w-2.5" />Dedicado</Label>
                                 </div>
+                                <div className="flex items-center gap-1">
+                                  <Switch checked={entry.isPaired ?? false} onCheckedChange={(v) => updateExtraEquipment(idx, { isPaired: v, simultaneo: v ? true : entry.simultaneo })} />
+                                  <Label className="text-[10px] flex items-center gap-0.5"><Link className="h-2.5 w-2.5" />Par</Label>
+                                </div>
                                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => removeExtraEquipment(idx)}>
                                   <Trash2 className="h-3 w-3 text-destructive" />
                                 </Button>
@@ -322,7 +326,7 @@ export default function Configuracoes() {
                                 return (
                                   <Badge key={i} variant="outline" className="text-[10px] px-2 py-0 font-medium border"
                                     style={{ borderColor: exColor, color: exColor, backgroundColor: exColor + "15" }}>
-                                    {exEq?.nome || "?"} {extra.isFirst ? "1→" : extra.simultaneo ? "⚡" : "→"}
+                                    {exEq?.nome || "?"} {extra.isPaired ? "🔗" : extra.isFirst ? "1→" : extra.simultaneo ? "⚡" : "→"}{extra.roleLabel ? ` (${extra.roleLabel})` : ''}
                                   </Badge>
                                 );
                               })}
