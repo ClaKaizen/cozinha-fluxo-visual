@@ -156,7 +156,7 @@ function GanttSection<TTask extends { id: string; doseLabel: string; artigo: str
                             }}
                             title={`${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`}
                           >
-                            <span className="truncate leading-tight">{isOverflow ? `⚠ ${task.artigo}` : `${(task as unknown as MachineTask).isFirstPhase ? "1→ " : (task as unknown as MachineTask).isSequentialPhase ? "→ " : task.showSimultaneousBadge ? "⊗ " : ""}${(task as unknown as MachineTask).isLunchSafe && seg.end > lunchStart && seg.start < lunchEnd ? "🍽 " : ""}${task.artigo}`}</span>
+                            <span className="truncate leading-tight">{isOverflow ? `⚠ ${task.artigo}` : `${(task as unknown as MachineTask).isFirstPhase ? "1→ " : (task as unknown as MachineTask).isSequentialPhase ? "→ " : task.showSimultaneousBadge ? "⊗ " : ""}${(task as unknown as MachineTask).isLunchSafe && rowLunch && seg.end > rowLunch.start && seg.start < rowLunch.end ? "🍽 " : ""}${task.artigo}`}</span>
                             {showTime && (
                               <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">
                                 {formatClock(seg.start)}–{formatClock(seg.end)}
