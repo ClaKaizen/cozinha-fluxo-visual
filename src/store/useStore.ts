@@ -82,6 +82,7 @@ export const useStore = create<AppState>()(
       absences: [],
       tempOperators: [],
       sequencingRules: [],
+      lunchSafeCategories: [],
 
       addEquipment: (e) => set((s) => ({ equipment: [...s.equipment, { ...e, id: uid() }] })),
       updateEquipment: (id, e) => set((s) => ({ equipment: s.equipment.map((eq) => eq.id === id ? { ...eq, ...e } : eq) })),
@@ -123,6 +124,13 @@ export const useStore = create<AppState>()(
       addSequencingRule: (rule) => set((s) => ({ sequencingRules: [...s.sequencingRules, { ...rule, id: uid() }] })),
       updateSequencingRule: (id, rule) => set((s) => ({ sequencingRules: s.sequencingRules.map((r) => r.id === id ? { ...r, ...rule } : r) })),
       deleteSequencingRule: (id) => set((s) => ({ sequencingRules: s.sequencingRules.filter((r) => r.id !== id) })),
+
+      addLunchSafeCategory: (categoryId) => set((s) => ({
+        lunchSafeCategories: s.lunchSafeCategories.includes(categoryId) ? s.lunchSafeCategories : [...s.lunchSafeCategories, categoryId]
+      })),
+      removeLunchSafeCategory: (categoryId) => set((s) => ({
+        lunchSafeCategories: s.lunchSafeCategories.filter((id) => id !== categoryId)
+      })),
 
       getProductionForDate: (date) => get().production.filter((p) => p.date === date),
 
