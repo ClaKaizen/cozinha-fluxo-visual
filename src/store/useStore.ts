@@ -183,6 +183,7 @@ export const useStore = create<AppState>()(
           operatorsForDate: ops,
           tempOperators: state.tempOperators,
           sequencingRules: state.sequencingRules,
+          lunchSafeCategories: state.lunchSafeCategories,
         });
 
         const equipMap = new Map<string, { totalMinutes: number; usesEmergency: boolean }>();
