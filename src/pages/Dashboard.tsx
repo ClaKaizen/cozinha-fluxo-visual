@@ -14,7 +14,7 @@ import { ShiftCode } from "@/store/types";
 import GanttChart from "@/components/GanttChart";
 import MachineSequence from "@/components/dashboard/MachineSequence";
 import OperatorSequence from "@/components/dashboard/OperatorSequence";
-import { buildDailyGanttSchedule, normalizeDateKey } from "@/components/gantt/scheduler";
+import { buildDailyGanttSchedule, normalizeDateKey, calculateMinimumStaffing } from "@/components/gantt/scheduler";
 
 const SHIFT_OPTIONS: ShiftCode[] = ['D', 'E', 'I', 'C'];
 
@@ -82,12 +82,25 @@ export default function Dashboard() {
     }
   };
 
-  const pessoasNecessarias = Math.ceil(stats.cargaDoDia / 8);
-  const pessoasNecessariasTeo = Math.ceil(stats.cargaTeorica / 8);
+  // Iterative feasibility-based staffing calculation
+  const staffing = useMemo(
+    () => calculateMinimumStaffing({
+      dateStr: normalizeDateKey(dateStr),
+      production: store.production,
+      categories: store.categories,
+      equipment: store.equipment,
+      operatorsForDate: operators,
+      tempOperators: store.tempOperators,
+      sequencingRules: store.sequencingRules,
+      lunchSafeCategories: store.lunchSafeCategories,
+    }),
+    [dateStr, store.production, store.categories, store.equipment, operators, store.tempOperators, store.sequencingRules, store.lunchSafeCategories]
+  );
+
+  const pessoasNecessarias = staffing.pessoasNecessarias;
   const delta = stats.pessoasPresentes - pessoasNecessarias;
-  const deltaTeo = stats.pessoasPresentes - pessoasNecessariasTeo;
   const dimensionamentoOk = delta >= 0;
-  const dimensionamentoTeoOk = deltaTeo >= 0;
+  const staffingInfeasible = !staffing.feasible;
 
   // Group production by equipment
   const enrichedProd = production.map((p) => {
@@ -195,38 +208,35 @@ export default function Dashboard() {
           </div>
         </Card>
 
-        {/* Pessoas Necessárias — dual */}
-        <Card className={`border-l-4 shadow-sm min-w-0 overflow-hidden ${dimensionamentoOk ? "border-l-success" : "border-l-danger"}`}>
+        {/* Pessoas Necessárias — scheduler-validated */}
+        <Card className={`border-l-4 shadow-sm min-w-0 overflow-hidden ${staffingInfeasible ? "border-l-warning" : dimensionamentoOk ? "border-l-success" : "border-l-danger"}`}>
           <div className="px-2.5 py-2 flex flex-col items-center justify-center h-full">
             <div className="flex items-center gap-1 mb-1.5">
               <span className="text-[11px] font-medium text-muted-foreground">Pessoas Nec.</span>
               <Tooltip>
                 <TooltipTrigger><Info className="h-3 w-3 text-muted-foreground" /></TooltipTrigger>
-                <TooltipContent className="max-w-[280px] text-xs">Real: ⌈Carga teórica ÷ 8h⌉ = {pessoasNecessariasTeo}. Com ineficiência: ⌈Carga real ÷ 8h⌉ = {pessoasNecessarias}</TooltipContent>
+                <TooltipContent className="max-w-[280px] text-xs">
+                  Mínimo de operadores para completar todas as tarefas até às 15:30, validado pelo scheduler real.
+                  {staffingInfeasible && ` ${staffing.warning}`}
+                </TooltipContent>
               </Tooltip>
             </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              <div className="rounded bg-blue-50 px-1.5 py-1.5 text-center">
-                <div className={`text-xl font-display font-bold whitespace-nowrap ${dimensionamentoTeoOk ? "text-success" : "text-danger"}`}>{pessoasNecessariasTeo}</div>
-                <p className="text-[9px] text-blue-400 mt-0.5">Real</p>
-                <p className={`text-[8px] font-medium leading-tight ${dimensionamentoTeoOk ? "text-success" : "text-danger"}`}>
-                  {deltaTeo === 0 ? "Correto" : deltaTeo > 0 ? `−${deltaTeo} exc.` : `+${Math.abs(deltaTeo)} em falta`}
-                </p>
-              </div>
-              <div className="rounded bg-yellow-50 px-1.5 py-1.5 text-center">
-                <div className={`text-xl font-display font-bold whitespace-nowrap ${dimensionamentoOk ? "text-success" : "text-danger"}`}>{pessoasNecessarias}</div>
-                <p className="text-[9px] text-yellow-600 mt-0.5">c/ Inefic.</p>
-                <p className={`text-[8px] font-medium leading-tight ${dimensionamentoOk ? "text-success" : "text-danger"}`}>
-                  {!dimensionamentoTeoOk && !dimensionamentoOk
-                    ? `+${Math.abs(delta)} em falta`
-                    : dimensionamentoTeoOk && !dimensionamentoOk
-                    ? `+${Math.abs(delta)} falta (inefic.)`
-                    : delta === 0
-                    ? "Correto"
-                    : `−${delta} exc.`}
-                </p>
+            <div className="flex items-center gap-1.5">
+              {staffingInfeasible && <AlertTriangle className="h-4 w-4 text-warning shrink-0" />}
+              {!dimensionamentoOk && !staffingInfeasible && <AlertTriangle className="h-4 w-4 text-danger shrink-0" />}
+              <div className={`text-3xl font-display font-bold ${staffingInfeasible ? "text-warning" : dimensionamentoOk ? "text-success" : "text-danger"}`}>
+                {pessoasNecessarias}
               </div>
             </div>
+            <p className={`text-[9px] font-medium mt-0.5 ${staffingInfeasible ? "text-warning" : dimensionamentoOk ? "text-success" : "text-danger"}`}>
+              {staffingInfeasible
+                ? "Inviável"
+                : delta === 0
+                ? "Correto"
+                : delta > 0
+                ? `−${delta} exc.`
+                : `+${Math.abs(delta)} em falta`}
+            </p>
           </div>
         </Card>
 
