@@ -364,6 +364,11 @@ function findEarliestMachineSlot(
         const slotAvail = Math.max(slots[existingDedicated] ?? DAY_START, minStart);
         if (slotAvail > phaseStart) phaseStart = slotAvail;
         slotPicks.push({ equipmentId: eqId, booking, machineIdx: existingDedicated });
+      } else if (existingPrimaryPaired !== undefined) {
+        // Reuse the same primary machine that's part of a pair
+        const slotAvail = Math.max(slots[existingPrimaryPaired] ?? DAY_START, minStart);
+        if (slotAvail > phaseStart) phaseStart = slotAvail;
+        slotPicks.push({ equipmentId: eqId, booking, machineIdx: existingPrimaryPaired });
       } else {
         // Get indices sorted by availability (earliest-free first), excluding reserved-by-others
         const availableIndices = Array.from({ length: maxIdx }, (_, i) => i)
