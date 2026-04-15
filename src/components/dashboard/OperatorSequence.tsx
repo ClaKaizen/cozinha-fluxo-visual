@@ -17,6 +17,89 @@ function occupancyPill(rate: number) {
     : "bg-success/15 text-success border-success/30";
 }
 
+interface GroupedRow {
+  type: "task";
+  machines: string; // "Fritadeira 1+2"
+  artigo: string;
+  qd: number;
+  start: number;
+  end: number;
+}
+
+interface LunchRow {
+  type: "lunch";
+  start: number;
+  end: number;
+}
+
+type DisplayRow = GroupedRow | LunchRow;
+
+function extractEquipmentType(machineLabel: string): string {
+  // "Fritadeira 1" → "Fritadeira", "Basculante 2 (Emergência)" → "Basculante"
+  return machineLabel.replace(/\s*\(Emergência\)/, "").replace(/\s+\d+$/, "");
+}
+
+function extractUnitNumber(machineLabel: string): string {
+  const m = machineLabel.match(/(\d+)/);
+  return m ? m[1] : "";
+}
+
+function buildGroupedRows(
+  tasks: Array<{ artigo: string; machineLabel: string; equipmentName: string; start: number; end: number }>,
+  lunch: OperatorLunchBreak | undefined,
+): DisplayRow[] {
+  const sorted = [...tasks].sort((a, b) => a.start - b.start);
+
+  // Group consecutive same-artigo, same-equipment-type with gap <= 5min
+  const groups: GroupedRow[] = [];
+  for (const t of sorted) {
+    const eqType = extractEquipmentType(t.machineLabel);
+    const unit = extractUnitNumber(t.machineLabel);
+    const last = groups[groups.length - 1];
+    if (
+      last &&
+      last.artigo === t.artigo &&
+      extractEquipmentType(last.machines) === eqType &&
+      t.start - last.end <= 5
+    ) {
+      // Extend group
+      last.end = Math.max(last.end, t.end);
+      last.qd += 1;
+      // Add unit number if not already present
+      const existingUnits = new Set(last.machines.replace(eqType + " ", "").split("+"));
+      if (unit && !existingUnits.has(unit)) {
+        const allUnits = [...existingUnits, unit].sort();
+        last.machines = `${eqType} ${allUnits.join("+")}`;
+      }
+    } else {
+      groups.push({
+        type: "task",
+        machines: t.machineLabel,
+        artigo: t.artigo,
+        qd: 1,
+        start: t.start,
+        end: t.end,
+      });
+    }
+  }
+
+  // Insert lunch
+  const rows: DisplayRow[] = [];
+  let lunchInserted = !lunch;
+  for (const g of groups) {
+    if (!lunchInserted && lunch && lunch.start <= g.start) {
+      rows.push({ type: "lunch", start: lunch.start, end: lunch.end });
+      lunchInserted = true;
+    }
+    rows.push(g);
+  }
+  if (!lunchInserted && lunch) {
+    rows.push({ type: "lunch", start: lunch.start, end: lunch.end });
+  }
+
+  return rows;
+}
+
 export default function OperatorSequence({ schedule, operatorHoursMap }: Props) {
   const [open, setOpen] = useState(false);
 
@@ -39,17 +122,16 @@ export default function OperatorSequence({ schedule, operatorHoursMap }: Props) 
             const opRate = (opHours / 8) * 100;
             const lunch = schedule.operatorLunchBreaks[row.label] as OperatorLunchBreak | undefined;
 
-            // Build timeline entries: tasks + lunch
-            type Entry = { time: number; artigo: string; equipment: string; isLunch?: boolean };
-            const entries: Entry[] = row.tasks.map((t) => ({
-              time: t.start,
-              artigo: t.artigo,
-              equipment: t.machineLabel || t.equipmentName,
-            }));
-            if (lunch) {
-              entries.push({ time: lunch.start, artigo: "🍽 Almoço", equipment: "—", isLunch: true });
-            }
-            entries.sort((a, b) => a.time - b.time);
+            const displayRows = buildGroupedRows(
+              row.tasks.map((t) => ({
+                artigo: t.artigo,
+                machineLabel: t.machineLabel || t.equipmentName,
+                equipmentName: t.equipmentName,
+                start: t.start,
+                end: t.end,
+              })),
+              lunch,
+            );
 
             return (
               <Card key={row.label} className="overflow-hidden shadow-sm">
@@ -62,19 +144,31 @@ export default function OperatorSequence({ schedule, operatorHoursMap }: Props) 
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-[10px] text-muted-foreground">
-                      <th className="text-left font-medium px-2 py-1">Início</th>
+                      <th className="text-left font-medium px-2 py-1">Máquina</th>
                       <th className="text-left font-medium px-2 py-1">Artigo</th>
-                      <th className="text-left font-medium px-2 py-1">Equipamento</th>
+                      <th className="text-right font-medium px-2 py-1">QD</th>
+                      <th className="text-left font-medium px-2 py-1">Início</th>
+                      <th className="text-left font-medium px-2 py-1">Fim</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {entries.map((e, idx) => (
-                      <tr key={idx} className={`border-b last:border-b-0 ${e.isLunch ? "bg-amber-50 text-muted-foreground italic" : idx % 2 === 0 ? "bg-muted/30" : ""}`}>
-                        <td className="px-2 py-1">{e.isLunch ? `— ${formatClock(e.time)}` : formatClock(e.time)}</td>
-                        <td className="px-2 py-1 font-medium">{e.artigo}</td>
-                        <td className="px-2 py-1">{e.equipment}</td>
-                      </tr>
-                    ))}
+                    {displayRows.map((r, idx) =>
+                      r.type === "lunch" ? (
+                        <tr key={`lunch-${idx}`} className="bg-amber-50 border-b">
+                          <td colSpan={5} className="px-2 py-1 text-center text-muted-foreground italic text-xs">
+                            — 🍽 Almoço — {formatClock(r.start)}–{formatClock(r.end)}
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr key={`${row.label}-${idx}`} className={`border-b last:border-b-0 ${idx % 2 === 0 ? "bg-muted/30" : ""}`}>
+                          <td className="px-2 py-1">{r.machines}</td>
+                          <td className="px-2 py-1 font-medium">{r.artigo}</td>
+                          <td className="px-2 py-1 text-right">{r.qd}</td>
+                          <td className="px-2 py-1">{formatClock(r.start)}</td>
+                          <td className="px-2 py-1">{formatClock(r.end)}</td>
+                        </tr>
+                      ),
+                    )}
                   </tbody>
                 </table>
               </Card>
