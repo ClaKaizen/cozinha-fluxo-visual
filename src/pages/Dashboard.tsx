@@ -14,7 +14,7 @@ import { ShiftCode } from "@/store/types";
 import GanttChart from "@/components/GanttChart";
 import MachineSequence from "@/components/dashboard/MachineSequence";
 import OperatorSequence from "@/components/dashboard/OperatorSequence";
-import { buildDailyGanttSchedule, normalizeDateKey } from "@/components/gantt/scheduler";
+import { buildDailyGanttSchedule, normalizeDateKey, calculateMinimumStaffing } from "@/components/gantt/scheduler";
 
 const SHIFT_OPTIONS: ShiftCode[] = ['D', 'E', 'I', 'C'];
 
