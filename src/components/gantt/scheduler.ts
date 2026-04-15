@@ -838,10 +838,10 @@ function tryAllPhases(
   let overallStart = Infinity;
 
   for (const phaseBookings of phases) {
-    const result = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, MACHINE_TARGET_STOP);
+    const result = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, MACHINE_TARGET_STOP, categoryId);
     if (!result) {
       // Try with overflow allowed (past hard stop)
-      const overflowResult = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, Infinity);
+      const overflowResult = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, Infinity, categoryId);
       if (!overflowResult) return null;
       // Mark as overflow but still return
       for (const a of overflowResult.assignments) {
