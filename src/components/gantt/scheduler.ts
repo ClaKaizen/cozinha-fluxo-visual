@@ -595,10 +595,17 @@ function jointSchedule(
 
       const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp, lunchSafeCategories);
       if (result) {
-        // Commit machine slots
+        // Commit machine slots and register dedicated machines
         for (const ma of result.machineAssignments) {
           const slots = tracker.slots.get(ma.booking.equipmentId);
           if (slots) slots[ma.machineIdx] = ma.end;
+          // Register dedicated machine assignment
+          if (ma.booking.isDedicated) {
+            const dedKey = `${task.categoryId}:${ma.booking.equipmentId}`;
+            if (!tracker.dedicatedSlots.has(dedKey)) {
+              tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
+            }
+          }
         }
 
         // Commit operator: each dose gets its own small T.Homem block
