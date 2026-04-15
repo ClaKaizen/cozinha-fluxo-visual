@@ -1108,7 +1108,6 @@ function tryAllPhases(
   equipmentMap: Map<string, Equipment>,
   allowEmergency: boolean,
   categoryId?: string,
-): { allAssignments: { booking: MachineBooking; machineIdx: number; start: number; end: number }[]; overallStart: number } | null {
 ): { allAssignments: ScheduledMachineAssignment[]; overallStart: number } | null {
   // Clone tracker for speculative scheduling
   const specTracker = cloneMachineTracker(tracker);
