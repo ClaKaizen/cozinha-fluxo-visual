@@ -1375,6 +1375,75 @@ function validateSchedule(assignments: JointAssignment[]) {
   }
 }
 
+// ── Minimum staffing calculator ─────────────────────────
+
+export interface MinimumStaffingResult {
+  pessoasNecessarias: number;
+  feasible: boolean;
+  warning?: string;
+}
+
+const MAX_STAFFING_SEARCH = 12;
+
+export function calculateMinimumStaffing(input: Omit<BuildScheduleInput, 'operatorsForDate' | 'tempOperators'> & {
+  operatorsForDate: BuildScheduleInput['operatorsForDate'];
+  tempOperators: BuildScheduleInput['tempOperators'];
+}): MinimumStaffingResult {
+  const { dateStr, production, categories, equipment, sequencingRules, lunchSafeCategories } = input;
+  const selectedDate = normalizeDateKey(dateStr);
+
+  // Check if there's any production at all
+  const dayProd = production.filter((p) => normalizeDateKey(p.date) === selectedDate);
+  if (dayProd.length === 0) return { pessoasNecessarias: 0, feasible: true };
+
+  // Estimate base from workload
+  const categoryMap = new Map(categories.map((c) => [c.id, c]));
+  let totalTHomemMin = 0;
+  dayProd.forEach((p) => {
+    const cat = categoryMap.get(p.categoriaId);
+    if (cat) {
+      const tH1 = cat.tempoCicloHomem1 ?? cat.tempoCicloHomem;
+      totalTHomemMin += tH1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloHomem : 0);
+    }
+  });
+
+  const baseEstimate = Math.max(1, Math.ceil(totalTHomemMin / OPERATOR_PRODUCTIVE_MINUTES));
+
+  // Iteratively try N operators using the real scheduler
+  for (let n = baseEstimate; n <= MAX_STAFFING_SEARCH; n++) {
+    // Create synthetic operator list
+    const syntheticOps: OperatorPresence[] = Array.from({ length: n }, (_, i) => ({
+      operator: { id: `synth-${i}`, nome: `Op${i + 1}` },
+      code: 'D' as ShiftCode,
+      absent: false,
+      hours: 8,
+    }));
+
+    const result = buildDailyGanttSchedule({
+      dateStr,
+      production,
+      categories,
+      equipment,
+      operatorsForDate: syntheticOps,
+      tempOperators: [],
+      sequencingRules,
+      lunchSafeCategories,
+    });
+
+    // Feasible = no overtime, no overflow, no unscheduled
+    if (!result.hasOvertime && result.overflowTasks.length === 0 && result.unscheduledTasks.length === 0) {
+      return { pessoasNecessarias: n, feasible: true };
+    }
+  }
+
+  // Never feasible within bounds
+  return {
+    pessoasNecessarias: MAX_STAFFING_SEARCH,
+    feasible: false,
+    warning: `Mesmo com ${MAX_STAFFING_SEARCH} operadores, nem todas as tarefas terminam a tempo`,
+  };
+}
+
 // ── Public API ──────────────────────────────────────────
 
 export function buildDailyGanttSchedule({
