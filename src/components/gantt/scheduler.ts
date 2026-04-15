@@ -900,19 +900,28 @@ function buildGanttFromAssignments(
     }
 
     // Create operator task — skip if this dose's operator work is covered by grouping (zero-duration)
-    if (operatorName && task.operatorDuration > 0 && operatorStart < operatorEnd) {
+    const accumulatedTHomem = (assignment as any)._accumulatedTHomem as number | undefined;
+    const groupedMachineCount = (assignment as any)._groupedMachineCount as number | undefined;
+    const effectiveOpDuration = accumulatedTHomem ?? task.operatorDuration;
+
+    if (operatorName && effectiveOpDuration > 0 && operatorStart < operatorEnd) {
       const opState = operatorStates.find((o) => o.name === operatorName);
       const opLunchStart = opState?.lunchStart ?? LUNCH_LATEST_START;
       const opLunchEnd = opState?.lunchEnd ?? LUNCH_LATEST_START + LUNCH_DURATION;
 
-      // Build segments respecting lunch
-      const opSegments = buildOperatorSegments(operatorStart, task.operatorDuration, opLunchStart, opLunchEnd);
+      // Build segments respecting lunch using the full accumulated T.Homem
+      const opSegments = buildOperatorSegments(operatorStart, effectiveOpDuration, opLunchStart, opLunchEnd);
 
       const firstMachine = machineTasksForThisAssignment[0];
-      const machineLabel = machineTasksForThisAssignment.map((mt) => mt.machineLabel).join(" + ");
+      const eqName = firstMachine?.equipmentName ?? task.equipmentName;
+      const machineCount = groupedMachineCount ?? 1;
+      const machineLabel = machineCount > 1
+        ? `${eqName} (×${machineCount})`
+        : machineTasksForThisAssignment.map((mt) => mt.machineLabel).join(" + ");
 
       const ot: OperatorTask = {
         ...task,
+        operatorDuration: effectiveOpDuration,
         operatorName,
         start: opSegments.start,
         end: opSegments.end,
