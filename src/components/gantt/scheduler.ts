@@ -783,7 +783,7 @@ function jointSchedule(
   // ── Step 3: Joint scheduling ──
   const operators: OperatorState[] = operatorNames.map((name) => ({
     name,
-    cursor: DAY_START,
+    cursor: OPERATOR_START,
     totalWorked: 0,
     hadLunch: false,
     lunchStart: LUNCH_WINDOW_START,
@@ -977,7 +977,7 @@ function jointSchedule(
     equipmentGroupOperators.clear();
 
     for (const op of operators) {
-      op.cursor = DAY_START;
+      op.cursor = OPERATOR_START;
       op.totalWorked = 0;
       op.hadLunch = false;
       op.lunchStart = sharedLunchStart;
@@ -1083,7 +1083,7 @@ function jointSchedule(
       savedEmergencyNames.forEach((n) => emergencyEquipmentNames.add(n));
 
       for (const op of operators) {
-        op.cursor = DAY_START;
+        op.cursor = OPERATOR_START;
         op.totalWorked = 0;
         op.hadLunch = false;
         op.lunchStart = sharedLunchStart;
