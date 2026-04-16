@@ -801,13 +801,13 @@ function jointSchedule(
   // equipmentId → list of operator names assigned to this group
   const equipmentGroupOperators = new Map<string, string[]>();
 
-  function getPreferredOperator(equipmentId: string): string | undefined {
+  function getPreferredOperator(equipmentId: string): { name: string; strict: boolean } | undefined {
     const eq = equipmentMap.get(equipmentId);
     const opsPerGroup = eq?.operatorsPerGroup ?? 1;
     const assigned = equipmentGroupOperators.get(equipmentId) ?? [];
-    // If we already have enough operators for this group, reuse them (round-robin)
-    if (assigned.length >= opsPerGroup) {
-      return assigned[0]; // prefer first assigned
+    // Once we have an operator assigned to this group, enforce strictly (only this person)
+    if (assigned.length >= opsPerGroup && assigned.length > 0) {
+      return { name: assigned[0], strict: true };
     }
     return undefined;
   }
