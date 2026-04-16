@@ -1369,7 +1369,12 @@ function tryJointSlot(
       if (prefOp) {
         const opStart = getOperatorEarliestStart(prefOp, machineStart, task.operatorDuration);
         if (opStart >= 0) {
-          // In strict mode: only this operator, wait for them even if others are free
+          // HARD CONSTRAINT: machine must not start before operator
+          // If operator can't start at machineStart, advance candidateTime
+          if (opStart > machineStart) {
+            candidateTime = opStart;
+            continue; // retry — machine will be re-found at the new candidateTime
+          }
           bestOp = prefOp;
           bestOpStart = opStart;
           bestOpLoad = prefOp.totalWorked;
@@ -1383,7 +1388,8 @@ function tryJointSlot(
         const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration);
         if (opStart < 0) continue;
 
-        if (opStart === machineStart || opStart <= machineStart + 5) {
+        // HARD CONSTRAINT: only accept operators who can start at machineStart (±5min tolerance)
+        if (opStart <= machineStart + 5) {
           if (op.totalWorked < bestOpLoad || (op.totalWorked === bestOpLoad && opStart < bestOpStart)) {
             bestOp = op;
             bestOpStart = opStart;
@@ -1393,17 +1399,22 @@ function tryJointSlot(
       }
     }
 
-    if (bestOp) {
-      const opStart = getOperatorEarliestStart(bestOp, machineStart, task.operatorDuration);
-      if (opStart >= 0) {
-        return {
-          task,
-          machineAssignments: machineResult.allAssignments,
-          operatorName: bestOp.name,
-          operatorStart: opStart,
-          operatorEnd: opStart + task.operatorDuration,
-        };
+    if (bestOp && bestOpStart <= machineStart + 5) {
+      // Synchronize: machine starts when operator starts (never before)
+      const syncStart = Math.max(machineStart, bestOpStart);
+      // Re-compute machine slots at syncStart if needed
+      if (syncStart > machineStart) {
+        // Retry with advanced candidateTime to align machine+operator
+        candidateTime = syncStart;
+        continue;
       }
+      return {
+        task,
+        machineAssignments: machineResult.allAssignments,
+        operatorName: bestOp.name,
+        operatorStart: bestOpStart,
+        operatorEnd: bestOpStart + task.operatorDuration,
+      };
     }
 
     // No operator available at machineStart - find earliest operator availability
@@ -1699,6 +1710,13 @@ function validateSchedule(assignments: JointAssignment[]) {
     }
     if (a.operatorEnd > OPERATOR_HARD_STOP) {
       console.warn(`[Scheduler] Operator ${a.operatorName} ends at ${formatClock(a.operatorEnd)} (past 15:30) for ${a.task.doseLabel}`);
+    }
+    // HARD CONSTRAINT: machine must never start before operator
+    if (a.task.operatorDuration > 0 && a.operatorName) {
+      const earliestMachine = Math.min(...a.machineAssignments.map(ma => ma.start));
+      if (earliestMachine < a.operatorStart) {
+        console.error(`[Scheduler] VIOLATION: Machine starts at ${formatClock(earliestMachine)} before operator ${a.operatorName} at ${formatClock(a.operatorStart)} for ${a.task.doseLabel}`);
+      }
     }
     for (const ma of a.machineAssignments) {
       if (ma.start >= MACHINE_TARGET_STOP) {
