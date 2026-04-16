@@ -1129,6 +1129,7 @@ function jointSchedule(
     scheduledCategoryEndTimes.clear();
     equipmentGroupOperators.clear();
     operatorCommitments.clear();
+    dedicatedSingleOpEquipOperators.clear();
 
     for (const op of operators) {
       op.cursor = OPERATOR_START;
