@@ -304,10 +304,13 @@ interface MachineSlotTracker {
   pairPreferences: Map<string, { primaryMachineIdx: number; pairedMachineIdx: number }>;
 }
 
-function createMachineTracker(equipment: Equipment[], allowEmergency: boolean): MachineSlotTracker {
+function createMachineTracker(equipment: Equipment[], allowEmergency: boolean, emergencyEquipIds?: Set<string>): MachineSlotTracker {
   const slots = new Map<string, number[]>();
   equipment.forEach((eq) => {
-    const count = allowEmergency ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
+    const useEmerg = emergencyEquipIds
+      ? emergencyEquipIds.has(eq.id)
+      : allowEmergency;
+    const count = useEmerg ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
     slots.set(eq.id, Array.from({ length: count }, () => DAY_START));
   });
   return { slots, dedicatedSlots: new Map(), pairPreferences: new Map() };
@@ -397,7 +400,7 @@ function findStandardMachineSlot(
     if (!eq) return null;
     const slots = tracker.slots.get(eqId);
     if (!slots) return null;
-    const maxIdx = allowEmergency ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
+    const maxIdx = slots.length;
     if (maxIdx < bookings.length) return null;
 
     for (let bi = 0; bi < bookings.length; bi++) {
@@ -533,8 +536,8 @@ function findPreferredMachinePair(
 
   const reservedByOthers = getReservedMachineSet(tracker, categoryId);
   const sameEquipment = primaryBooking.equipmentId === pairedBooking.equipmentId;
-  const primaryMaxIdx = allowEmergency ? primaryEquipment.quantidade + primaryEquipment.quantidadeEmergencia : primaryEquipment.quantidade;
-  const pairedMaxIdx = allowEmergency ? pairedEquipment.quantidade + pairedEquipment.quantidadeEmergencia : pairedEquipment.quantidade;
+  const primaryMaxIdx = primarySlots.length;
+  const pairedMaxIdx = pairedSlots.length;
   const primaryIndices = Array.from(
     { length: sameEquipment ? primaryEquipment.quantidade : primaryMaxIdx },
     (_, index) => index,
@@ -931,23 +934,40 @@ function jointSchedule(
     remaining = [...remaining, ...tryScheduleAll(false, circularTasks)];
   }
 
-  // ── Emergency auto-activation ──
-  // Check if any scheduled assignment overflows (machine > 15:40 or operator > 15:30)
-  const hasEmergencyEquip = equipment.some((eq) => eq.quantidadeEmergencia > 0);
-  const hasOverflowInAssignments = assignments.some((a) => {
-    const machineOverflow = a.machineAssignments.some((ma) => ma.end > MACHINE_TARGET_STOP);
-    const operatorOverflow = a.operatorEnd > OPERATOR_HARD_STOP;
-    return machineOverflow || operatorOverflow;
-  });
+  // ── Emergency auto-activation (per equipment type) ──
+  // Identify which equipment types actually have overflow
+  const overflowEquipIds = new Set<string>();
+  for (const a of assignments) {
+    for (const ma of a.machineAssignments) {
+      if (ma.end > MACHINE_TARGET_STOP) {
+        overflowEquipIds.add(ma.booking.equipmentId);
+      }
+    }
+  }
+  // Also check remaining (unscheduled) tasks for their equipment types
+  for (const task of remaining) {
+    for (const b of task.machineBookings) {
+      overflowEquipIds.add(b.equipmentId);
+    }
+  }
 
-  if ((remaining.length > 0 || hasOverflowInAssignments) && hasEmergencyEquip) {
-    // Save current state, then try full re-run with emergency enabled
+  // Filter to only equipment types that actually have emergency capacity
+  const emergencyEligible = new Set<string>();
+  for (const eqId of overflowEquipIds) {
+    const eq = equipmentMap.get(eqId);
+    if (eq && eq.quantidadeEmergencia > 0) {
+      emergencyEligible.add(eqId);
+    }
+  }
+
+  if (emergencyEligible.size > 0 && (remaining.length > 0 || overflowEquipIds.size > 0)) {
+    // Save current state
     const savedAssignments = [...assignments];
     const savedOverflow = [...overflowTasks];
     const savedUnscheduled = [...unscheduledTasks];
     const savedEmergencyNames = new Set(emergencyEquipmentNames);
 
-    // Reset state for emergency re-run
+    // Reset state for re-run with per-type emergency
     assignments.length = 0;
     overflowTasks.length = 0;
     unscheduledTasks.length = 0;
@@ -955,7 +975,6 @@ function jointSchedule(
     scheduledCategoryEndTimes.clear();
     equipmentGroupOperators.clear();
 
-    // Reset operators
     for (const op of operators) {
       op.cursor = DAY_START;
       op.totalWorked = 0;
@@ -964,20 +983,83 @@ function jointSchedule(
       op.lunchEnd = sharedLunchStart + LUNCH_DURATION_MIN;
     }
 
-    // Re-run all passes with emergency
-    let emergRemaining = tryScheduleAll(true, pass1Tasks);
+    // Override tryScheduleAll to use per-type emergency
+    function tryScheduleAllPerType(tasksToSchedule: PlanningTask[]): PlanningTask[] {
+      const tracker = createMachineTracker(equipment, false, emergencyEligible);
+
+      // Restore machine slots from already-committed assignments
+      for (const a of assignments) {
+        for (const ma of a.machineAssignments) {
+          const slots = tracker.slots.get(ma.booking.equipmentId);
+          if (slots && slots[ma.machineIdx] < ma.end) {
+            slots[ma.machineIdx] = ma.end;
+          }
+        }
+        const cookingA = a.machineAssignments.find((ma) => ma.pairRole === "cooking");
+        const coolingA = a.machineAssignments.find((ma) => ma.pairRole === "cooling");
+        if (cookingA && coolingA) {
+          tracker.pairPreferences.set(
+            getPairPreferenceKey(a.task.categoryId, cookingA.booking.equipmentId, coolingA.booking.equipmentId),
+            { primaryMachineIdx: cookingA.machineIdx, pairedMachineIdx: coolingA.machineIdx },
+          );
+        }
+      }
+
+      const rem: PlanningTask[] = [];
+      for (const task of tasksToSchedule) {
+        const depMinStart = getMinStartForTask(task);
+        const primaryEqId = task.equipmentId;
+        const preferredOp = getPreferredOperator(primaryEqId);
+        // allowEmergency=true here because createMachineTracker already has per-type slots
+        const result = tryJointSlot(task, tracker, operators, equipmentMap, true, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
+        if (result) {
+          for (const ma of result.machineAssignments) {
+            const slots = tracker.slots.get(ma.booking.equipmentId);
+            if (slots) slots[ma.machineIdx] = ma.end;
+            if (ma.booking.isDedicated) {
+              const dedKey = `${task.categoryId}:${ma.booking.equipmentId}:ded`;
+              if (!tracker.dedicatedSlots.has(dedKey)) tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
+            }
+          }
+          const cookingA = result.machineAssignments.find((ma) => ma.pairRole === "cooking");
+          const coolingA = result.machineAssignments.find((ma) => ma.pairRole === "cooling");
+          if (cookingA && coolingA) {
+            tracker.pairPreferences.set(
+              getPairPreferenceKey(task.categoryId, cookingA.booking.equipmentId, coolingA.booking.equipmentId),
+              { primaryMachineIdx: cookingA.machineIdx, pairedMachineIdx: coolingA.machineIdx },
+            );
+          }
+          if (result.operatorName && task.operatorDuration > 0) {
+            const op = operators.find((o) => o.name === result.operatorName)!;
+            if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
+            registerGroupOperator(primaryEqId, result.operatorName);
+          }
+          for (const ma of result.machineAssignments) {
+            const eqItem = equipmentMap.get(ma.booking.equipmentId);
+            if (eqItem && ma.machineIdx >= eqItem.quantidade) {
+              emergencyEquipmentNames.add(eqItem.nome);
+            }
+          }
+          const maxEnd = Math.max(...result.machineAssignments.map(ma => ma.end));
+          const prevEnd = scheduledCategoryEndTimes.get(task.categoryId) ?? 0;
+          scheduledCategoryEndTimes.set(task.categoryId, Math.max(prevEnd, maxEnd));
+          assignments.push(result);
+        } else {
+          rem.push(task);
+        }
+      }
+      return rem;
+    }
+
+    let emergRemaining = tryScheduleAllPerType(pass1Tasks);
     if (deferredTasks.length > 0) {
-      emergRemaining = [...emergRemaining, ...tryScheduleAll(true, deferredTasks)];
+      emergRemaining = [...emergRemaining, ...tryScheduleAllPerType(deferredTasks)];
     }
     if (circularTasks.length > 0) {
-      emergRemaining = [...emergRemaining, ...tryScheduleAll(true, circularTasks)];
+      emergRemaining = [...emergRemaining, ...tryScheduleAllPerType(circularTasks)];
     }
 
-    // Check if emergency run is better (less overflow)
-    const emergHasOverflow = assignments.some((a) => {
-      return a.machineAssignments.some((ma) => ma.end > MACHINE_TARGET_STOP) || a.operatorEnd > OPERATOR_HARD_STOP;
-    });
-
+    // Compare: is per-type emergency better than normal?
     const normalProblems = savedAssignments.filter((a) =>
       a.machineAssignments.some((ma) => ma.end > MACHINE_TARGET_STOP) || a.operatorEnd > OPERATOR_HARD_STOP
     ).length + remaining.length;
@@ -987,10 +1069,9 @@ function jointSchedule(
     ).length + emergRemaining.length;
 
     if (emergProblems < normalProblems) {
-      // Emergency is better — keep it
       remaining = emergRemaining;
     } else {
-      // Normal was same or better — revert
+      // Revert to normal
       assignments.length = 0;
       assignments.push(...savedAssignments);
       overflowTasks.length = 0;
@@ -1000,7 +1081,6 @@ function jointSchedule(
       emergencyEquipmentNames.clear();
       savedEmergencyNames.forEach((n) => emergencyEquipmentNames.add(n));
 
-      // Reset operators and replay saved assignments
       for (const op of operators) {
         op.cursor = DAY_START;
         op.totalWorked = 0;
@@ -1013,14 +1093,6 @@ function jointSchedule(
         if (a.operatorName && a.task.operatorDuration > 0) {
           const op = operators.find((o) => o.name === a.operatorName);
           if (op) commitOperator(op, a.operatorStart, a.task.operatorDuration);
-        }
-      }
-
-      // Try emergency for remaining only
-      if (remaining.length > 0) {
-        const opsFree = operators.some((op) => op.totalWorked < OPERATOR_PRODUCTIVE_MINUTES - 10);
-        if (opsFree) {
-          remaining = tryScheduleAll(true, remaining);
         }
       }
     }
