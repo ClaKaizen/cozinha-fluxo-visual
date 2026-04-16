@@ -9,7 +9,8 @@ import {
   WORKING_CODES,
 } from "@/store/types";
 
-export const DAY_START = 7 * 60;           // 420 — 07:00
+export const DAY_START = 7 * 60;           // 420 — 07:00 (machines can start here)
+export const OPERATOR_START = 7 * 60 + 10; // 430 — 07:10 (operators start here)
 export const DAY_END = 16 * 60;            // 960 — 16:00 (axis extent for overflow visibility)
 export const OPERATOR_HARD_STOP = 15 * 60 + 30;  // 930 — 15:30
 export const MACHINE_TARGET_STOP = 15 * 60 + 40; // 940 — 15:40
@@ -17,7 +18,7 @@ export const AVAILABLE_MACHINE_MINUTES = 480;
 const LUNCH_WINDOW_START = 12 * 60;  // 720
 const LUNCH_LATEST_START = 13 * 60;  // 780
 const LUNCH_DURATION_MIN = 60;
-const OPERATOR_PRODUCTIVE_MINUTES = 450; // 07:00–15:30 minus 60min lunch
+const OPERATOR_PRODUCTIVE_MINUTES = 440; // 07:10–15:30 minus 60min lunch
 
 // ── Shared types ──────────────────────────────────────────────
 
