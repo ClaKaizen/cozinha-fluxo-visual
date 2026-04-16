@@ -14,7 +14,7 @@ describe("example", () => {
         nome: "Basculante",
         quantidade: 3,
         quantidadeEmergencia: 1,
-        operatorsPerGroup: 1,
+        multiOperador: true,
       },
     ];
 
@@ -85,7 +85,7 @@ describe("example", () => {
 
   it("paired machine block spans full primary duration, not shorter additional duration", () => {
     const equipment: Equipment[] = [
-      { id: "basc", nome: "Basculante", quantidade: 3, quantidadeEmergencia: 1, operatorsPerGroup: 1 },
+      { id: "basc", nome: "Basculante", quantidade: 3, quantidadeEmergencia: 1, multiOperador: true },
     ];
 
     const categories: Category[] = [

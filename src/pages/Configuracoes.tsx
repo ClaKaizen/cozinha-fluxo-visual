@@ -18,7 +18,7 @@ const EQUIPMENT_COLORS = [
 export default function Configuracoes() {
   const store = useStore();
 
-  const [eqForm, setEqForm] = useState({ nome: "", quantidade: "", quantidadeEmergencia: "", operatorsPerGroup: "1" });
+  const [eqForm, setEqForm] = useState({ nome: "", quantidade: "", quantidadeEmergencia: "", multiOperador: true });
   const [editEq, setEditEq] = useState<string | null>(null);
 
   const [catForm, setCatForm] = useState({
@@ -39,9 +39,9 @@ export default function Configuracoes() {
         nome: eqForm.nome.trim(),
         quantidade: Number(eqForm.quantidade) || 1,
         quantidadeEmergencia: Number(eqForm.quantidadeEmergencia) || 0,
-        operatorsPerGroup: Math.max(1, Number(eqForm.operatorsPerGroup) || 1),
+        multiOperador: eqForm.multiOperador,
       });
-      setEqForm({ nome: "", quantidade: "", quantidadeEmergencia: "", operatorsPerGroup: "1" });
+      setEqForm({ nome: "", quantidade: "", quantidadeEmergencia: "", multiOperador: true });
     }
   };
 
@@ -50,10 +50,10 @@ export default function Configuracoes() {
       nome: eqForm.nome,
       quantidade: Number(eqForm.quantidade) || 1,
       quantidadeEmergencia: Number(eqForm.quantidadeEmergencia) || 0,
-      operatorsPerGroup: Math.max(1, Number(eqForm.operatorsPerGroup) || 1),
+      multiOperador: eqForm.multiOperador,
     });
     setEditEq(null);
-    setEqForm({ nome: "", quantidade: "", quantidadeEmergencia: "", operatorsPerGroup: "1" });
+    setEqForm({ nome: "", quantidade: "", quantidadeEmergencia: "", multiOperador: true });
   };
 
   const handleAddCat = () => {
@@ -131,7 +131,7 @@ export default function Configuracoes() {
                 <th className={`text-left font-medium ${cellCls}`}>Nome</th>
                 <th className={`text-right font-medium ${cellCls}`}>Qtd. Normal</th>
                 <th className={`text-right font-medium ${cellCls}`}>Qtd. Emergência</th>
-                <th className={`text-right font-medium ${cellCls}`} title="Número de operadores necessários para gerir todos os equipamentos deste tipo a funcionar em simultâneo">Op./Grupo</th>
+                <th className={`text-center font-medium ${cellCls}`} title="Se este tipo de equipamento permite operadores independentes em simultâneo em máquinas diferentes">Vários Op. Simult.?</th>
                 <th className={`${cellCls} w-[80px]`}></th>
               </tr>
             </thead>
@@ -143,7 +143,7 @@ export default function Configuracoes() {
                       <td className={cellCls}><Input value={eqForm.nome} onChange={(e) => setEqForm({ ...eqForm, nome: e.target.value })} className={inputCls} /></td>
                       <td className={cellCls}><Input type="number" value={eqForm.quantidade} onChange={(e) => setEqForm({ ...eqForm, quantidade: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
                       <td className={cellCls}><Input type="number" value={eqForm.quantidadeEmergencia} onChange={(e) => setEqForm({ ...eqForm, quantidadeEmergencia: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
-                      <td className={cellCls}><Input type="number" min={1} value={eqForm.operatorsPerGroup} onChange={(e) => setEqForm({ ...eqForm, operatorsPerGroup: e.target.value })} className={`${inputCls} w-16 ml-auto`} /></td>
+                      <td className={`${cellCls} text-center`}><Switch checked={eqForm.multiOperador} onCheckedChange={(v) => setEqForm({ ...eqForm, multiOperador: v })} /></td>
                       <td className={`${cellCls} text-right`}>
                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleSaveEq(eq.id)}><Save className="h-3 w-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setEditEq(null)}><X className="h-3 w-3" /></Button>
@@ -162,11 +162,15 @@ export default function Configuracoes() {
                           <span className="text-muted-foreground">0</span>
                         )}
                       </td>
-                      <td className={`${cellCls} text-right`}>{eq.operatorsPerGroup ?? 1}</td>
+                      <td className={`${cellCls} text-center`}>
+                        <Badge variant={eq.multiOperador !== false ? "default" : "outline"} className="text-[10px] cursor-default">
+                          {eq.multiOperador !== false ? "Sim" : "Não"}
+                        </Badge>
+                      </td>
                       <td className={`${cellCls} text-right`}>
                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => {
                           setEditEq(eq.id);
-                          setEqForm({ nome: eq.nome, quantidade: String(eq.quantidade), quantidadeEmergencia: String(eq.quantidadeEmergencia ?? 0), operatorsPerGroup: String(eq.operatorsPerGroup ?? 1) });
+                          setEqForm({ nome: eq.nome, quantidade: String(eq.quantidade), quantidadeEmergencia: String(eq.quantidadeEmergencia ?? 0), multiOperador: eq.multiOperador !== false });
                         }}>
                           <Edit2 className="h-3 w-3" />
                         </Button>
@@ -184,7 +188,10 @@ export default function Configuracoes() {
             <Input placeholder="Nome do equipamento" value={editEq ? "" : eqForm.nome} onChange={(e) => !editEq && setEqForm({ ...eqForm, nome: e.target.value })} className="h-8 text-xs" disabled={!!editEq} />
             <Input placeholder="Qtd. Normal" type="number" value={editEq ? "" : eqForm.quantidade} onChange={(e) => !editEq && setEqForm({ ...eqForm, quantidade: e.target.value })} className="h-8 text-xs w-24" disabled={!!editEq} />
             <Input placeholder="Qtd. Emerg." type="number" value={editEq ? "" : eqForm.quantidadeEmergencia} onChange={(e) => !editEq && setEqForm({ ...eqForm, quantidadeEmergencia: e.target.value })} className="h-8 text-xs w-24" disabled={!!editEq} />
-            <Input placeholder="Op./Grupo" type="number" min={1} value={editEq ? "" : eqForm.operatorsPerGroup} onChange={(e) => !editEq && setEqForm({ ...eqForm, operatorsPerGroup: e.target.value })} className="h-8 text-xs w-20" disabled={!!editEq} />
+            <div className="flex items-center gap-2">
+              <Switch checked={editEq ? false : eqForm.multiOperador} onCheckedChange={(v) => !editEq && setEqForm({ ...eqForm, multiOperador: v })} disabled={!!editEq} />
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">Vários Op.</Label>
+            </div>
             <Button onClick={handleAddEq} disabled={!!editEq} size="sm" className="h-8 text-xs"><Plus className="h-3 w-3 mr-1" /> Adicionar</Button>
           </div>
         </CardContent>
