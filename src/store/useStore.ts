@@ -67,9 +67,9 @@ export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
       equipment: [
-        { id: 'eq1', nome: 'Basculante', quantidade: 4, quantidadeEmergencia: 0, operatorsPerGroup: 1 },
-        { id: 'eq2', nome: 'Forno', quantidade: 3, quantidadeEmergencia: 0, operatorsPerGroup: 1 },
-        { id: 'eq3', nome: 'Panela', quantidade: 2, quantidadeEmergencia: 0, operatorsPerGroup: 1 },
+        { id: 'eq1', nome: 'Basculante', quantidade: 4, quantidadeEmergencia: 0, multiOperador: true },
+        { id: 'eq2', nome: 'Forno', quantidade: 3, quantidadeEmergencia: 0, multiOperador: true },
+        { id: 'eq3', nome: 'Panela', quantidade: 2, quantidadeEmergencia: 0, multiOperador: true },
       ],
       categories: [
         { id: 'cat1', nome: 'Molho Base Bechamel', equipamentoId: 'eq3', tempoCicloHomem: 15, tempoCicloMaquina: 45, unidade: 'kg' },
@@ -151,21 +151,15 @@ export const useStore = create<AppState>()(
         const ops = state.getOperatorsForDate(date);
         const temps = state.tempOperators.filter((t) => t.date === date);
 
-        // Carga: T. Homem with operator grouping (Op./Grupo)
-        // Total T.Homem = T.Homem 1ª + (QD-1) × T.Homem Seg. — always sequential per operator
-        // Multiply by operatorsPerGroup (1 by default, more if configured)
+        // Carga: T. Homem — sequential per operator
+        // Total T.Homem = T.Homem 1ª + (QD-1) × T.Homem Seg.
         let cargaMinutes = 0;
         prod.forEach((p) => {
           const cat = state.categories.find((c) => c.id === p.categoriaId);
           if (cat) {
             const tHomem1 = cat.tempoCicloHomem1 ?? cat.tempoCicloHomem;
             const totalTHomem = tHomem1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloHomem : 0);
-            const eq = state.equipment.find((e) => e.id === cat.equipamentoId);
-            const opsPerGroup = eq?.operatorsPerGroup ?? 1;
-            // With Op./Grupo: the total hands-on time stays the same, but shared across opsPerGroup operators
-            // Contribution = totalTHomem (not divided by machines, not multiplied by machines)
-            // For opsPerGroup > 1: multiply because each operator does the full workload
-            cargaMinutes += totalTHomem * opsPerGroup;
+            cargaMinutes += totalTHomem;
           }
         });
         const cargaTeorica = cargaMinutes / 60;
@@ -218,6 +212,23 @@ export const useStore = create<AppState>()(
         return match?.categoriaId;
       },
     }),
-    { name: 'cla-catering-store' }
+    {
+      name: 'cla-catering-store',
+      migrate: (persisted: any) => {
+        // Migrate operatorsPerGroup → multiOperador
+        if (persisted && Array.isArray(persisted.equipment)) {
+          persisted.equipment = persisted.equipment.map((eq: any) => {
+            if (eq.multiOperador === undefined) {
+              const isFritadeira = eq.nome?.toLowerCase().includes('fritadeira');
+              eq.multiOperador = !isFritadeira;
+            }
+            delete eq.operatorsPerGroup;
+            return eq;
+          });
+        }
+        return persisted;
+      },
+      version: 1,
+    }
   )
 );
