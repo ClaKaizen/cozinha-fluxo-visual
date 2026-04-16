@@ -2147,8 +2147,7 @@ export function buildDailyGanttSchedule({
   // Run joint optimizer
   const result = jointSchedule(tasks, equipment, equipmentMap, allOpNames, sequencingRules ?? [], lunchSafeCategories ?? []);
 
-  // Validate
-  validateSchedule(result.assignments);
+  // Validate (deferred until after operatorStates are built)
 
   // Build operator states for Gantt
   const operatorStates: OperatorState[] = allOpNames.map((name) => ({
@@ -2173,42 +2172,9 @@ export function buildDailyGanttSchedule({
     ensureLunch(op);
   }
 
+  // Run comprehensive validation
+  validateSchedule(result.assignments, operatorStates, equipmentMap, result.emergencyEquipmentNames, tasks, result.unscheduledTasks);
 
-  const gantt = buildGanttFromAssignments(
-    result.assignments,
-    equipment,
-    equipmentMap,
-    allOpNames,
-    operatorStates,
-    result.overflowTasks,
-    result.unscheduledTasks,
-    result.emergencyEquipmentNames,
-    result.staffingWarning,
-    lunchSafeCategories ?? [],
-  );
-
-  // Determine lunch times from operator states
-  const lunchStarts = operatorStates.map((o) => o.lunchStart);
-  const lunchStart = lunchStarts.length > 0 ? Math.min(...lunchStarts) : LUNCH_WINDOW_START;
-  const lunchEnd = lunchStart + LUNCH_DURATION_MIN;
-
-  // ── Dose validation: ensure scheduled doses match planned quantities ──
-  const dosesByArticle = new Map<string, number>();
-  for (const t of tasks) {
-    dosesByArticle.set(t.artigo, (dosesByArticle.get(t.artigo) ?? 0) + 1);
-  }
-  const scheduledByArticle = new Map<string, number>();
-  for (const a of result.assignments) {
-    scheduledByArticle.set(a.task.artigo, (scheduledByArticle.get(a.task.artigo) ?? 0) + 1);
-  }
-  // Add unscheduled
-  for (const u of result.unscheduledTasks) {
-    scheduledByArticle.set(u.artigo, (scheduledByArticle.get(u.artigo) ?? 0) + u.dosesRemaining);
-  }
-  for (const [artigo, planned] of dosesByArticle) {
-    const total = scheduledByArticle.get(artigo) ?? 0;
-    console.assert(total === planned, `[Scheduler] Overflow de doses: ${artigo} — planeado ${planned}, agendado ${total}`);
-  }
 
   return {
     tasks,
