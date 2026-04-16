@@ -318,7 +318,9 @@ function OperatorGanttSection({
   const totalSpan = axisEnd - OPERATOR_START;
   const chartWidth = Math.max(760, totalSpan * pixelsPerMinute);
   const toPercent = (minutes: number) => ((minutes - OPERATOR_START) / totalSpan) * 100;
-  const markers = Array.from({ length: Math.floor((axisEnd - OPERATOR_START) / 30) + 1 }, (_, i) => OPERATOR_START + i * 30);
+  // Grid markers on 30-min intervals aligned to clock, starting from first >= OPERATOR_START
+  const firstMarker = Math.ceil(OPERATOR_START / 30) * 30; // 450 = 07:30
+  const markers = [OPERATOR_START, ...Array.from({ length: Math.floor((axisEnd - firstMarker) / 30) + 1 }, (_, i) => firstMarker + i * 30)];
   const totalHeight = rows.length * rowHeight;
   const hardStopLeft = toPercent(OPERATOR_HARD_STOP);
   const secondaryStopLeft = toPercent(MACHINE_TARGET_STOP);
