@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   DAY_END,
   DAY_START,
+  OPERATOR_START,
   OPERATOR_HARD_STOP,
   MACHINE_TARGET_STOP,
   formatClock,
@@ -314,10 +315,12 @@ function OperatorGanttSection({
   const labelWidth = 148;
   const rowHeight = 42;
   const pixelsPerMinute = 1.55;
-  const totalSpan = axisEnd - DAY_START;
+  const totalSpan = axisEnd - OPERATOR_START;
   const chartWidth = Math.max(760, totalSpan * pixelsPerMinute);
-  const toPercent = (minutes: number) => ((minutes - DAY_START) / totalSpan) * 100;
-  const markers = Array.from({ length: Math.floor((axisEnd - DAY_START) / 30) + 1 }, (_, i) => DAY_START + i * 30);
+  const toPercent = (minutes: number) => ((minutes - OPERATOR_START) / totalSpan) * 100;
+  // Grid markers on 30-min intervals aligned to clock, starting from first >= OPERATOR_START
+  const firstMarker = Math.ceil(OPERATOR_START / 30) * 30; // 450 = 07:30
+  const markers = [OPERATOR_START, ...Array.from({ length: Math.floor((axisEnd - firstMarker) / 30) + 1 }, (_, i) => firstMarker + i * 30)];
   const totalHeight = rows.length * rowHeight;
   const hardStopLeft = toPercent(OPERATOR_HARD_STOP);
   const secondaryStopLeft = toPercent(MACHINE_TARGET_STOP);
@@ -326,7 +329,7 @@ function OperatorGanttSection({
     <div className="overflow-x-auto">
       <div style={{ minWidth: labelWidth + chartWidth + 24 }}>
         <div className="relative mb-2" style={{ marginLeft: labelWidth, height: 18 }}>
-          {markers.filter((m) => m % 60 === 0).map((m) => (
+          {markers.filter((m) => m === OPERATOR_START || m % 60 === 0).map((m) => (
             <div key={m} className="absolute text-[10px] font-medium text-muted-foreground" style={{ left: `${toPercent(m)}%`, transform: "translateX(-50%)" }}>
               {formatClock(m)}
             </div>
