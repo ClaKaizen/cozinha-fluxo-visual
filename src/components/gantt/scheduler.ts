@@ -304,10 +304,13 @@ interface MachineSlotTracker {
   pairPreferences: Map<string, { primaryMachineIdx: number; pairedMachineIdx: number }>;
 }
 
-function createMachineTracker(equipment: Equipment[], allowEmergency: boolean): MachineSlotTracker {
+function createMachineTracker(equipment: Equipment[], allowEmergency: boolean, emergencyEquipIds?: Set<string>): MachineSlotTracker {
   const slots = new Map<string, number[]>();
   equipment.forEach((eq) => {
-    const count = allowEmergency ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
+    const useEmerg = emergencyEquipIds
+      ? emergencyEquipIds.has(eq.id)
+      : allowEmergency;
+    const count = useEmerg ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
     slots.set(eq.id, Array.from({ length: count }, () => DAY_START));
   });
   return { slots, dedicatedSlots: new Map(), pairPreferences: new Map() };
