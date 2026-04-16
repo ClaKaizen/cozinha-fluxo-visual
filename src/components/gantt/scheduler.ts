@@ -1019,11 +1019,12 @@ function jointSchedule(
         );
       }
 
-      // Commit operator
+      // Commit operator and register continuity
       if (result.operatorName && task.operatorDuration > 0) {
         const op = operators.find((o) => o.name === result.operatorName)!;
         if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
         registerGroupOperator(task.equipmentId, result.operatorName);
+        registerCommitment(result.operatorName, task, pending);
       }
 
       // Track emergency
