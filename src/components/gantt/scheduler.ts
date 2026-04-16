@@ -1414,14 +1414,8 @@ function tryJointSlot(
     // If preferred didn't work (or no preferred), try all operators — but NOT if strict
     if (!bestOp && !strictPreferred) {
       for (const op of operators) {
-        // Skip operators committed to a different artigo
-        if (isOperatorCommittedElsewhere(op.name, task)) continue;
-        // Skip operators dedicated to non-multiOperador equipment (e.g. Fritadeira)
-        // unless this task is on that same equipment
-        if (dedicatedSingleOpEquipOperators.has(op.name)) {
-          const assignedToThisEquip = (equipmentGroupOperators.get(task.equipmentId) ?? []).includes(op.name);
-          if (!assignedToThisEquip) continue;
-        }
+        // Skip excluded operators (e.g. committed elsewhere or dedicated to Fritadeira)
+        if (excludedOperators.has(op.name)) continue;
 
         const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration);
         if (opStart < 0) continue;
