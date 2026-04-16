@@ -803,10 +803,10 @@ function jointSchedule(
 
   function getPreferredOperator(equipmentId: string): { name: string; strict: boolean } | undefined {
     const eq = equipmentMap.get(equipmentId);
-    const opsPerGroup = eq?.operatorsPerGroup ?? 1;
+    const isMulti = eq?.multiOperador ?? true;
     const assigned = equipmentGroupOperators.get(equipmentId) ?? [];
-    // Once we have an operator assigned to this group, enforce strictly (only this person)
-    if (assigned.length >= opsPerGroup && assigned.length > 0) {
+    // If multiOperador is false, enforce single operator for entire equipment group
+    if (!isMulti && assigned.length > 0) {
       return { name: assigned[0], strict: true };
     }
     return undefined;
@@ -819,8 +819,9 @@ function jointSchedule(
     const ops = equipmentGroupOperators.get(equipmentId)!;
     if (!ops.includes(operatorName)) {
       const eq = equipmentMap.get(equipmentId);
-      const opsPerGroup = eq?.operatorsPerGroup ?? 1;
-      if (ops.length < opsPerGroup) {
+      const isMulti = eq?.multiOperador ?? true;
+      // If multiOperador, allow multiple operators; otherwise cap at 1
+      if (isMulti || ops.length < 1) {
         ops.push(operatorName);
       }
     }

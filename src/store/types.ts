@@ -3,7 +3,7 @@ export interface Equipment {
   nome: string;
   quantidade: number;
   quantidadeEmergencia: number;
-  operatorsPerGroup: number;
+  multiOperador: boolean;
 }
 
 export interface CategoryEquipmentEntry {
