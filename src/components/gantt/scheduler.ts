@@ -964,15 +964,23 @@ function jointSchedule(
           }
         }
 
-        // Skip this task if its only viable operators are all committed elsewhere
-        // (but allow if no commitment exists for this artigo — a free operator can take it)
-        if (!committedOp) {
-          // Check if ALL free operators are committed to other artigos
-          const freeOps = operators.filter(o => !isOperatorCommittedElsewhere(o.name, task));
-          if (freeOps.length === 0 && operators.length > 0) continue; // all committed elsewhere, defer
+        // Build excluded operators set for this task
+        const excludedOps = new Set<string>();
+        for (const opName of dedicatedSingleOpEquipOperators) {
+          const assignedToThisEquip = (equipmentGroupOperators.get(primaryEqId) ?? []).includes(opName);
+          if (!assignedToThisEquip) excludedOps.add(opName);
+        }
+        for (const op of operators) {
+          if (isOperatorCommittedElsewhere(op.name, task)) excludedOps.add(op.name);
         }
 
-        const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOpName, lunchSafeCategories, strictPref);
+        // Skip if ALL operators are excluded
+        if (!committedOp) {
+          const availOps = operators.filter(o => !excludedOps.has(o.name));
+          if (availOps.length === 0 && operators.length > 0) continue;
+        }
+
+        const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOpName, lunchSafeCategories, strictPref, excludedOps);
         if (result) {
           // Reject if the assigned operator is committed to a different artigo
           if (result.operatorName && isOperatorCommittedElsewhere(result.operatorName, task)) continue;
