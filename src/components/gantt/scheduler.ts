@@ -860,7 +860,7 @@ function jointSchedule(
       // Get preferred operator for Op./Grupo enforcement
       const preferredOp = getPreferredOperator(primaryEqId);
 
-      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp, lunchSafeCategories);
+      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
       if (result) {
         // Commit machine slots and register dedicated machines / preferred pairs
         for (const ma of result.machineAssignments) {
