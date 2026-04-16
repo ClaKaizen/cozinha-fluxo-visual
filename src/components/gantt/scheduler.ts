@@ -536,8 +536,8 @@ function findPreferredMachinePair(
 
   const reservedByOthers = getReservedMachineSet(tracker, categoryId);
   const sameEquipment = primaryBooking.equipmentId === pairedBooking.equipmentId;
-  const primaryMaxIdx = allowEmergency ? primaryEquipment.quantidade + primaryEquipment.quantidadeEmergencia : primaryEquipment.quantidade;
-  const pairedMaxIdx = allowEmergency ? pairedEquipment.quantidade + pairedEquipment.quantidadeEmergencia : pairedEquipment.quantidade;
+  const primaryMaxIdx = primarySlots.length;
+  const pairedMaxIdx = pairedSlots.length;
   const primaryIndices = Array.from(
     { length: sameEquipment ? primaryEquipment.quantidade : primaryMaxIdx },
     (_, index) => index,
