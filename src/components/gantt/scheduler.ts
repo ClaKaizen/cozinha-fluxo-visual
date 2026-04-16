@@ -1217,6 +1217,7 @@ function jointSchedule(
           const op = operators.find((o) => o.name === result.operatorName)!;
           if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
           registerGroupOperator(task.equipmentId, result.operatorName);
+          registerCommitment(result.operatorName, task, pending);
         }
         for (const ma of result.machineAssignments) {
           const eqItem = equipmentMap.get(ma.booking.equipmentId);
