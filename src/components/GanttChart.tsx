@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   DAY_END,
   DAY_START,
+  OPERATOR_START,
   OPERATOR_HARD_STOP,
   MACHINE_TARGET_STOP,
   formatClock,
