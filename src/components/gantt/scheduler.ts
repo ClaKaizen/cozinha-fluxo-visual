@@ -400,7 +400,7 @@ function findStandardMachineSlot(
     if (!eq) return null;
     const slots = tracker.slots.get(eqId);
     if (!slots) return null;
-    const maxIdx = allowEmergency ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
+    const maxIdx = slots.length;
     if (maxIdx < bookings.length) return null;
 
     for (let bi = 0; bi < bookings.length; bi++) {
