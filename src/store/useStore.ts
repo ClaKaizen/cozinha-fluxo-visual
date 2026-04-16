@@ -212,6 +212,23 @@ export const useStore = create<AppState>()(
         return match?.categoriaId;
       },
     }),
-    { name: 'cla-catering-store' }
+    {
+      name: 'cla-catering-store',
+      migrate: (persisted: any) => {
+        // Migrate operatorsPerGroup → multiOperador
+        if (persisted && Array.isArray(persisted.equipment)) {
+          persisted.equipment = persisted.equipment.map((eq: any) => {
+            if (eq.multiOperador === undefined) {
+              const isFritadeira = eq.nome?.toLowerCase().includes('fritadeira');
+              eq.multiOperador = !isFritadeira;
+            }
+            delete eq.operatorsPerGroup;
+            return eq;
+          });
+        }
+        return persisted;
+      },
+      version: 1,
+    }
   )
 );
