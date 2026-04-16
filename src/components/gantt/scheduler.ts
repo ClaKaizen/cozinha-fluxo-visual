@@ -1873,18 +1873,6 @@ export function buildDailyGanttSchedule({
     ensureLunch(op);
   }
 
-  if (selectedDate === "2026-04-16") {
-    operatorStates.slice(0, 3).forEach((op) => {
-      console.log("[Lunch Debug 16/04]", {
-        operator: op.name,
-        lunchStart: op.lunchStart,
-        lunchEnd: op.lunchEnd,
-        lunchDuration: op.lunchEnd - op.lunchStart,
-        lunchStartClock: formatClock(op.lunchStart),
-        lunchEndClock: formatClock(op.lunchEnd),
-      });
-    });
-  }
 
   const gantt = buildGanttFromAssignments(
     result.assignments,
