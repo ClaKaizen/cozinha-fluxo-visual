@@ -805,6 +805,10 @@ function jointSchedule(
   // equipmentId → list of operator names assigned to this group
   const equipmentGroupOperators = new Map<string, string[]>();
 
+  // ── Operator continuity: once an operator starts an artigo, they finish all its cycles ──
+  // operatorName → { artigo, equipmentId, remaining }
+  const operatorCommitments = new Map<string, { artigo: string; equipmentId: string; remaining: number }>();
+
   function getPreferredOperator(equipmentId: string): { name: string; strict: boolean } | undefined {
     const eq = equipmentMap.get(equipmentId);
     const isMulti = eq?.multiOperador ?? true;
@@ -828,6 +832,32 @@ function jointSchedule(
       if (isMulti || ops.length < 1) {
         ops.push(operatorName);
       }
+    }
+  }
+
+  /** Check if an operator is committed to a different artigo than the given task */
+  function isOperatorCommittedElsewhere(opName: string, task: PlanningTask): boolean {
+    const commitment = operatorCommitments.get(opName);
+    if (!commitment || commitment.remaining <= 0) return false;
+    return commitment.artigo !== task.artigo;
+  }
+
+  /** Get the committed operator for a given artigo, if any */
+  function getCommittedOperator(task: PlanningTask): string | undefined {
+    for (const [opName, c] of operatorCommitments) {
+      if (c.artigo === task.artigo && c.remaining > 0) return opName;
+    }
+    return undefined;
+  }
+
+  /** Register or update commitment when an operator is assigned a task */
+  function registerCommitment(opName: string, task: PlanningTask, pendingTasks: PlanningTask[]) {
+    const remaining = pendingTasks.filter(t => t.artigo === task.artigo).length;
+    if (remaining > 0) {
+      operatorCommitments.set(opName, { artigo: task.artigo, equipmentId: task.equipmentId, remaining });
+    } else {
+      // Last cycle — clear commitment
+      operatorCommitments.delete(opName);
     }
   }
 
