@@ -1092,6 +1092,7 @@ function jointSchedule(
     emergencyEquipmentNames.clear();
     scheduledCategoryEndTimes.clear();
     equipmentGroupOperators.clear();
+    operatorCommitments.clear();
 
     for (const op of operators) {
       op.cursor = OPERATOR_START;
