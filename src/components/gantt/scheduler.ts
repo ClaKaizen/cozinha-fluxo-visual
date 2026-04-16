@@ -1335,6 +1335,7 @@ function tryJointSlot(
   preferredOperator?: string,
   lunchSafeCategoryIds: string[] = [],
   strictPreferred: boolean = false,
+  excludedOperators: Set<string> = new Set(),
 ): JointAssignment | null {
   const isLunchSafe = lunchSafeCategoryIds.includes(task.categoryId);
   const phases = buildBookingPhases(task);
