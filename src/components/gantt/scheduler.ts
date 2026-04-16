@@ -805,6 +805,10 @@ function jointSchedule(
   // equipmentId → list of operator names assigned to this group
   const equipmentGroupOperators = new Map<string, string[]>();
 
+  // ── Operator continuity: once an operator starts an artigo, they finish all its cycles ──
+  // operatorName → { artigo, equipmentId, remaining }
+  const operatorCommitments = new Map<string, { artigo: string; equipmentId: string; remaining: number }>();
+
   function getPreferredOperator(equipmentId: string): { name: string; strict: boolean } | undefined {
     const eq = equipmentMap.get(equipmentId);
     const isMulti = eq?.multiOperador ?? true;
@@ -828,6 +832,32 @@ function jointSchedule(
       if (isMulti || ops.length < 1) {
         ops.push(operatorName);
       }
+    }
+  }
+
+  /** Check if an operator is committed to a different artigo than the given task */
+  function isOperatorCommittedElsewhere(opName: string, task: PlanningTask): boolean {
+    const commitment = operatorCommitments.get(opName);
+    if (!commitment || commitment.remaining <= 0) return false;
+    return commitment.artigo !== task.artigo;
+  }
+
+  /** Get the committed operator for a given artigo, if any */
+  function getCommittedOperator(task: PlanningTask): string | undefined {
+    for (const [opName, c] of operatorCommitments) {
+      if (c.artigo === task.artigo && c.remaining > 0) return opName;
+    }
+    return undefined;
+  }
+
+  /** Register or update commitment when an operator is assigned a task */
+  function registerCommitment(opName: string, task: PlanningTask, pendingTasks: PlanningTask[]) {
+    const remaining = pendingTasks.filter(t => t.artigo === task.artigo).length;
+    if (remaining > 0) {
+      operatorCommitments.set(opName, { artigo: task.artigo, equipmentId: task.equipmentId, remaining });
+    } else {
+      // Last cycle — clear commitment
+      operatorCommitments.delete(opName);
     }
   }
 
@@ -889,10 +919,36 @@ function jointSchedule(
 
         const depMinStart = getMinStartForTask(task);
         const primaryEqId = task.equipmentId;
-        const preferredOp = getPreferredOperator(primaryEqId);
 
-        const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
+        // Determine preferred operator: committed operator > equipment group preference
+        let preferredOpName: string | undefined;
+        let strictPref = false;
+
+        const committedOp = getCommittedOperator(task);
+        if (committedOp) {
+          preferredOpName = committedOp;
+          strictPref = true; // committed operator MUST do this task
+        } else {
+          const groupPref = getPreferredOperator(primaryEqId);
+          if (groupPref) {
+            preferredOpName = groupPref.name;
+            strictPref = groupPref.strict;
+          }
+        }
+
+        // Skip this task if its only viable operators are all committed elsewhere
+        // (but allow if no commitment exists for this artigo — a free operator can take it)
+        if (!committedOp) {
+          // Check if ALL free operators are committed to other artigos
+          const freeOps = operators.filter(o => !isOperatorCommittedElsewhere(o.name, task));
+          if (freeOps.length === 0 && operators.length > 0) continue; // all committed elsewhere, defer
+        }
+
+        const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOpName, lunchSafeCategories, strictPref);
         if (result) {
+          // Reject if the assigned operator is committed to a different artigo
+          if (result.operatorName && isOperatorCommittedElsewhere(result.operatorName, task)) continue;
+
           const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
           const onIdleEquip = !busyEquipmentIds.has(primaryEqId);
 
@@ -902,14 +958,10 @@ function jointSchedule(
           if (bestIdx < 0) {
             isBetter = true;
           } else if (onIdleEquip && !bestOnIdleEquip) {
-            // Prefer idle equipment — but only if this task starts within a reasonable window
-            // (don't pick a task starting at 14:00 over one at 09:33 just because equipment is idle)
             isBetter = taskStart <= bestStart + 60;
           } else if (!onIdleEquip && bestOnIdleEquip) {
-            // Don't replace an idle-equip pick with a busy-equip one
             isBetter = false;
           } else {
-            // Same priority class: pick earliest start
             isBetter = taskStart < bestStart;
           }
 
@@ -967,11 +1019,12 @@ function jointSchedule(
         );
       }
 
-      // Commit operator
+      // Commit operator and register continuity
       if (result.operatorName && task.operatorDuration > 0) {
         const op = operators.find((o) => o.name === result.operatorName)!;
         if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
         registerGroupOperator(task.equipmentId, result.operatorName);
+        registerCommitment(result.operatorName, task, pending);
       }
 
       // Track emergency
@@ -1039,6 +1092,7 @@ function jointSchedule(
     emergencyEquipmentNames.clear();
     scheduledCategoryEndTimes.clear();
     equipmentGroupOperators.clear();
+    operatorCommitments.clear();
 
     for (const op of operators) {
       op.cursor = OPERATOR_START;
@@ -1092,9 +1146,26 @@ function jointSchedule(
           if (!depsScheduled(task)) continue;
           const depMinStart = getMinStartForTask(task);
           const primaryEqId = task.equipmentId;
-          const preferredOp = getPreferredOperator(primaryEqId);
-          const result = tryJointSlot(task, tracker, operators, equipmentMap, true, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
+
+          // Operator continuity + group preference
+          let preferredOpName: string | undefined;
+          let strictPref = false;
+          const committedOp = getCommittedOperator(task);
+          if (committedOp) {
+            preferredOpName = committedOp;
+            strictPref = true;
+          } else {
+            const groupPref = getPreferredOperator(primaryEqId);
+            if (groupPref) { preferredOpName = groupPref.name; strictPref = groupPref.strict; }
+          }
+          if (!committedOp) {
+            const freeOps = operators.filter(o => !isOperatorCommittedElsewhere(o.name, task));
+            if (freeOps.length === 0 && operators.length > 0) continue;
+          }
+
+          const result = tryJointSlot(task, tracker, operators, equipmentMap, true, equipment, depMinStart, preferredOpName, lunchSafeCategories, strictPref);
           if (result) {
+            if (result.operatorName && isOperatorCommittedElsewhere(result.operatorName, task)) continue;
             const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
             const onIdle = !busyEqIds.has(primaryEqId);
             let isBetter = false;
@@ -1147,6 +1218,7 @@ function jointSchedule(
           const op = operators.find((o) => o.name === result.operatorName)!;
           if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
           registerGroupOperator(task.equipmentId, result.operatorName);
+          registerCommitment(result.operatorName, task, pending);
         }
         for (const ma of result.machineAssignments) {
           const eqItem = equipmentMap.get(ma.booking.equipmentId);
@@ -1743,7 +1815,8 @@ export function buildDailyGanttSchedule({
         const tMaqPrimaryFull = isFirst ? (cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina) : cat.tempoCicloMaquina;
         // Scale durations for partial last cycle
         const tHomem = fraction < 1 ? Math.max(1, Math.round(tHomemFull * fraction)) : tHomemFull;
-        const tMaqPrimary = fraction < 1 ? Math.max(1, Math.round(tMaqPrimaryFull * fraction)) : tMaqPrimaryFull;
+        // Machine always runs a full cycle even for partial doses
+        const tMaqPrimary = tMaqPrimaryFull;
         const primaryColorIndex = (equipmentIndex.get(machine.id) ?? 0) % 6;
 
         const bookings: MachineBooking[] = [];
@@ -1764,7 +1837,8 @@ export function buildDailyGanttSchedule({
             const extraDurationFull = isFirst
               ? (extra.tempoCicloMaquina1 ?? extra.tempoCicloMaquina)
               : extra.tempoCicloMaquina;
-            const extraDuration = fraction < 1 ? Math.max(1, Math.round(extraDurationFull * fraction)) : extraDurationFull;
+            // Machine always runs full cycle even for partial doses
+            const extraDuration = extraDurationFull;
             if (extraDuration <= 0) continue;
             const isFirstPhase = extra.isFirst ?? false;
             bookings.push({
