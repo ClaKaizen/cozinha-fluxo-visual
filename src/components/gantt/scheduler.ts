@@ -857,83 +857,111 @@ function jointSchedule(
     }
 
     const remaining: PlanningTask[] = [];
+    const pending = [...tasksToSchedule];
 
-    for (const task of tasksToSchedule) {
-      const depMinStart = getMinStartForTask(task);
+    // Greedy earliest-start: repeatedly pick the task that can start earliest
+    let maxIterations = pending.length * pending.length + pending.length;
+    while (pending.length > 0 && maxIterations-- > 0) {
+      let bestIdx = -1;
+      let bestResult: JointAssignment | null = null;
+      let bestStart = Infinity;
 
-      const primaryEqId = task.equipmentId;
-      // Get preferred operator for Op./Grupo enforcement
-      const preferredOp = getPreferredOperator(primaryEqId);
+      for (let ti = 0; ti < pending.length; ti++) {
+        const task = pending[ti];
+        // Skip if dependencies not yet met
+        if (!depsScheduled(task)) continue;
 
-      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
-      if (result) {
-        // Commit machine slots and register dedicated machines / preferred pairs
-        for (const ma of result.machineAssignments) {
-          const slots = tracker.slots.get(ma.booking.equipmentId);
-          if (slots) slots[ma.machineIdx] = ma.end;
-          // Register dedicated machine assignment
-          if (ma.booking.isDedicated) {
-            const dedKey = `${task.categoryId}:${ma.booking.equipmentId}:ded`;
-            if (!tracker.dedicatedSlots.has(dedKey)) {
-              tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
+        const depMinStart = getMinStartForTask(task);
+        const primaryEqId = task.equipmentId;
+        const preferredOp = getPreferredOperator(primaryEqId);
+
+        const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
+        if (result) {
+          const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
+          if (taskStart < bestStart) {
+            bestStart = taskStart;
+            bestResult = result;
+            bestIdx = ti;
+          }
+        }
+      }
+
+      if (bestIdx < 0) {
+        // No task could be scheduled — check if any have unmet deps that might resolve
+        const hasUnmetDeps = pending.some(t => !depsScheduled(t));
+        if (hasUnmetDeps) {
+          // Move tasks with unmet deps to remaining
+          for (let i = pending.length - 1; i >= 0; i--) {
+            if (!depsScheduled(pending[i])) {
+              remaining.push(...pending.splice(i, 1));
             }
           }
+          continue;
         }
+        // All truly unschedulable
+        remaining.push(...pending);
+        break;
+      }
 
-        const cookingAssignment = result.machineAssignments.find((ma) => ma.pairRole === "cooking");
-        const coolingAssignment = result.machineAssignments.find((ma) => ma.pairRole === "cooling");
-        if (cookingAssignment && coolingAssignment) {
-          tracker.pairPreferences.set(
-            getPairPreferenceKey(task.categoryId, cookingAssignment.booking.equipmentId, coolingAssignment.booking.equipmentId),
-            {
-              primaryMachineIdx: cookingAssignment.machineIdx,
-              pairedMachineIdx: coolingAssignment.machineIdx,
-            },
-          );
-        }
+      const task = pending[bestIdx];
+      const result = bestResult!;
+      pending.splice(bestIdx, 1);
 
-        // Commit operator: each dose gets its own small T.Homem block
-        if (result.operatorName && task.operatorDuration > 0) {
-          const op = operators.find((o) => o.name === result.operatorName)!;
-          if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
-          // Register for Op./Grupo enforcement
-          registerGroupOperator(primaryEqId, result.operatorName);
-        }
-
-        // Track emergency
-        for (const ma of result.machineAssignments) {
-          const eqItem = equipmentMap.get(ma.booking.equipmentId);
-          if (eqItem && ma.machineIdx >= eqItem.quantidade) {
-            emergencyEquipmentNames.add(eqItem.nome);
+      // Commit machine slots and register dedicated machines / preferred pairs
+      for (const ma of result.machineAssignments) {
+        const slots = tracker.slots.get(ma.booking.equipmentId);
+        if (slots) slots[ma.machineIdx] = ma.end;
+        if (ma.booking.isDedicated) {
+          const dedKey = `${task.categoryId}:${ma.booking.equipmentId}:ded`;
+          if (!tracker.dedicatedSlots.has(dedKey)) {
+            tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
           }
         }
-
-        // Update category end times
-        const maxMachineEnd = Math.max(...result.machineAssignments.map(ma => ma.end));
-        const prevEnd = scheduledCategoryEndTimes.get(task.categoryId) ?? 0;
-        scheduledCategoryEndTimes.set(task.categoryId, Math.max(prevEnd, maxMachineEnd));
-
-        assignments.push(result);
-      } else {
-        remaining.push(task);
       }
+
+      const cookingAssignment = result.machineAssignments.find((ma) => ma.pairRole === "cooking");
+      const coolingAssignment = result.machineAssignments.find((ma) => ma.pairRole === "cooling");
+      if (cookingAssignment && coolingAssignment) {
+        tracker.pairPreferences.set(
+          getPairPreferenceKey(task.categoryId, cookingAssignment.booking.equipmentId, coolingAssignment.booking.equipmentId),
+          {
+            primaryMachineIdx: cookingAssignment.machineIdx,
+            pairedMachineIdx: coolingAssignment.machineIdx,
+          },
+        );
+      }
+
+      // Commit operator
+      if (result.operatorName && task.operatorDuration > 0) {
+        const op = operators.find((o) => o.name === result.operatorName)!;
+        if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
+        registerGroupOperator(task.equipmentId, result.operatorName);
+      }
+
+      // Track emergency
+      for (const ma of result.machineAssignments) {
+        const eqItem = equipmentMap.get(ma.booking.equipmentId);
+        if (eqItem && ma.machineIdx >= eqItem.quantidade) {
+          emergencyEquipmentNames.add(eqItem.nome);
+        }
+      }
+
+      // Update category end times
+      const maxMachineEnd = Math.max(...result.machineAssignments.map(ma => ma.end));
+      const prevEnd = scheduledCategoryEndTimes.get(task.categoryId) ?? 0;
+      scheduledCategoryEndTimes.set(task.categoryId, Math.max(prevEnd, maxMachineEnd));
+
+      assignments.push(result);
     }
 
+    // Any leftover pending tasks
+    remaining.push(...pending);
     return remaining;
   }
 
-  // Pass 1: Schedule tasks with no unmet dependencies (normal machines)
-  let remaining = tryScheduleAll(false, pass1Tasks);
-
-  // Pass 2: Schedule deferred tasks (dependencies now met)
-  if (deferredTasks.length > 0) {
-    remaining = [...remaining, ...tryScheduleAll(false, deferredTasks)];
-  }
-
-  // Schedule circular tasks normally
-  if (circularTasks.length > 0) {
-    remaining = [...remaining, ...tryScheduleAll(false, circularTasks)];
-  }
+  // Schedule all tasks together — greedy picks earliest-startable across all categories
+  const allTasks = [...pass1Tasks, ...deferredTasks, ...circularTasks];
+  let remaining = tryScheduleAll(false, allTasks);
 
   // ── Emergency auto-activation (per equipment type) ──
   // Identify which equipment types actually have overflow
@@ -1052,13 +1080,7 @@ function jointSchedule(
       return rem;
     }
 
-    let emergRemaining = tryScheduleAllPerType(pass1Tasks);
-    if (deferredTasks.length > 0) {
-      emergRemaining = [...emergRemaining, ...tryScheduleAllPerType(deferredTasks)];
-    }
-    if (circularTasks.length > 0) {
-      emergRemaining = [...emergRemaining, ...tryScheduleAllPerType(circularTasks)];
-    }
+    const emergRemaining = tryScheduleAllPerType(allTasks);
 
     // Compare: is per-type emergency better than normal?
     const normalProblems = savedAssignments.filter((a) =>
@@ -1633,10 +1655,20 @@ export function buildDailyGanttSchedule({
       const machine = cat ? equipmentMap.get(cat.equipamentoId) : undefined;
       if (!cat || !machine) return;
 
-      for (let i = 0; i < entry.quantidade; i++) {
+      const nCiclos = Math.ceil(entry.quantidade);
+      for (let i = 0; i < nCiclos; i++) {
         const isFirst = i === 0;
-        const tHomem = isFirst ? (cat.tempoCicloHomem1 ?? cat.tempoCicloHomem) : cat.tempoCicloHomem;
-        const tMaqPrimary = isFirst ? (cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina) : cat.tempoCicloMaquina;
+        const isLast = i === nCiclos - 1;
+        // Fraction for the last partial cycle (e.g. 0.2 for 2.2 doses)
+        const fraction = isLast && entry.quantidade % 1 !== 0
+          ? entry.quantidade - Math.floor(entry.quantidade)
+          : 1;
+
+        const tHomemFull = isFirst ? (cat.tempoCicloHomem1 ?? cat.tempoCicloHomem) : cat.tempoCicloHomem;
+        const tMaqPrimaryFull = isFirst ? (cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina) : cat.tempoCicloMaquina;
+        // Scale durations for partial last cycle
+        const tHomem = fraction < 1 ? Math.max(1, Math.round(tHomemFull * fraction)) : tHomemFull;
+        const tMaqPrimary = fraction < 1 ? Math.max(1, Math.round(tMaqPrimaryFull * fraction)) : tMaqPrimaryFull;
         const primaryColorIndex = (equipmentIndex.get(machine.id) ?? 0) % 6;
 
         const bookings: MachineBooking[] = [];
@@ -1654,9 +1686,10 @@ export function buildDailyGanttSchedule({
           for (const extra of cat.equipamentos) {
             const extraEq = equipmentMap.get(extra.equipamentoId);
             if (!extraEq) continue;
-            const extraDuration = isFirst
+            const extraDurationFull = isFirst
               ? (extra.tempoCicloMaquina1 ?? extra.tempoCicloMaquina)
               : extra.tempoCicloMaquina;
+            const extraDuration = fraction < 1 ? Math.max(1, Math.round(extraDurationFull * fraction)) : extraDurationFull;
             if (extraDuration <= 0) continue;
             const isFirstPhase = extra.isFirst ?? false;
             bookings.push({
@@ -1685,10 +1718,22 @@ export function buildDailyGanttSchedule({
         const simMax = simBookings.length > 0 ? Math.max(...simBookings.map((b) => b.duration)) : 0;
         const totalMachineDuration = seqTotal + simMax;
 
+        // Dose label: show fraction for partial cycles
+        const doseNumber = i + 1;
+        const totalDisplay = entry.quantidade % 1 !== 0
+          ? entry.quantidade.toFixed(1)
+          : String(entry.quantidade);
+        const doseDisplay = isLast && fraction < 1
+          ? `${fraction.toFixed(1)}`
+          : String(doseNumber);
+        const doseLabel = nCiclos > 1
+          ? `${entry.artigo} (${doseDisplay}/${totalDisplay})`
+          : entry.artigo;
+
         tasks.push({
           id: `${entry.id}-d${i}`,
           artigo: entry.artigo,
-          doseLabel: entry.quantidade > 1 ? `${entry.artigo} (${i + 1}/${entry.quantidade})` : entry.artigo,
+          doseLabel,
           equipmentId: machine.id,
           equipmentName: machine.nome,
           categoryName: cat.nome,
@@ -1783,6 +1828,24 @@ export function buildDailyGanttSchedule({
   const lunchStarts = operatorStates.map((o) => o.lunchStart);
   const lunchStart = lunchStarts.length > 0 ? Math.min(...lunchStarts) : LUNCH_WINDOW_START;
   const lunchEnd = lunchStart + LUNCH_DURATION_MIN;
+
+  // ── Dose validation: ensure scheduled doses match planned quantities ──
+  const dosesByArticle = new Map<string, number>();
+  for (const t of tasks) {
+    dosesByArticle.set(t.artigo, (dosesByArticle.get(t.artigo) ?? 0) + 1);
+  }
+  const scheduledByArticle = new Map<string, number>();
+  for (const a of result.assignments) {
+    scheduledByArticle.set(a.task.artigo, (scheduledByArticle.get(a.task.artigo) ?? 0) + 1);
+  }
+  // Add unscheduled
+  for (const u of result.unscheduledTasks) {
+    scheduledByArticle.set(u.artigo, (scheduledByArticle.get(u.artigo) ?? 0) + u.dosesRemaining);
+  }
+  for (const [artigo, planned] of dosesByArticle) {
+    const total = scheduledByArticle.get(artigo) ?? 0;
+    console.assert(total === planned, `[Scheduler] Overflow de doses: ${artigo} — planeado ${planned}, agendado ${total}`);
+  }
 
   return {
     tasks,
