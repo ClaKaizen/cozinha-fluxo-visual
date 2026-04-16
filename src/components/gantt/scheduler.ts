@@ -806,8 +806,14 @@ function jointSchedule(
   const equipmentGroupOperators = new Map<string, string[]>();
 
   // ── Operator continuity: once an operator starts an artigo, they finish all its cycles ──
+  // ONLY for non-multiOperador equipment (e.g. Fritadeira). For multiOperador equipment
+  // (Basculante, Marmita, Forno) load balancing distributes across operators instead.
   // operatorName → { artigo, equipmentId, remaining }
   const operatorCommitments = new Map<string, { artigo: string; equipmentId: string; remaining: number }>();
+
+  // Track the operator dedicated to non-multiOperador equipment (e.g. Fritadeira).
+  // This operator is excluded from other tasks' load balancing.
+  const dedicatedSingleOpEquipOperators = new Set<string>();
 
   function getPreferredOperator(equipmentId: string): { name: string; strict: boolean } | undefined {
     const eq = equipmentMap.get(equipmentId);
@@ -832,6 +838,10 @@ function jointSchedule(
       if (isMulti || ops.length < 1) {
         ops.push(operatorName);
       }
+      // Mark as dedicated single-op if non-multiOperador
+      if (!isMulti) {
+        dedicatedSingleOpEquipOperators.add(operatorName);
+      }
     }
   }
 
@@ -850,15 +860,33 @@ function jointSchedule(
     return undefined;
   }
 
-  /** Register or update commitment when an operator is assigned a task */
+  /** Check if an operator is dedicated to a non-multiOperador equipment (e.g. Fritadeira)
+   *  and should be excluded from other tasks */
+  function isOperatorDedicatedToSingleOp(opName: string, taskEquipmentId: string): boolean {
+    if (!dedicatedSingleOpEquipOperators.has(opName)) return false;
+    // Allow if the task is on the same non-multiOperador equipment
+    const assigned = equipmentGroupOperators.get(taskEquipmentId);
+    if (assigned && assigned.includes(opName)) return true; // same equipment — OK
+    // Check if this equipment is also non-multiOperador and this op is assigned to it
+    // Otherwise, this op is dedicated elsewhere — exclude
+    return true; // dedicated to different equipment — exclude
+  }
+
+  /** Register or update commitment when an operator is assigned a task.
+   *  Only creates commitments for non-multiOperador equipment. */
   function registerCommitment(opName: string, task: PlanningTask, pendingTasks: PlanningTask[]) {
-    const remaining = pendingTasks.filter(t => t.artigo === task.artigo).length;
-    if (remaining > 0) {
-      operatorCommitments.set(opName, { artigo: task.artigo, equipmentId: task.equipmentId, remaining });
-    } else {
-      // Last cycle — clear commitment
-      operatorCommitments.delete(opName);
+    const eq = equipmentMap.get(task.equipmentId);
+    const isMulti = eq?.multiOperador ?? true;
+    // Only commit for non-multiOperador equipment (task continuity on Fritadeira etc.)
+    if (!isMulti) {
+      const remaining = pendingTasks.filter(t => t.artigo === task.artigo).length;
+      if (remaining > 0) {
+        operatorCommitments.set(opName, { artigo: task.artigo, equipmentId: task.equipmentId, remaining });
+      } else {
+        operatorCommitments.delete(opName);
+      }
     }
+    // For multiOperador equipment, no commitment — load balancing distributes freely
   }
 
   function tryScheduleAll(allowEmergency: boolean, tasksToSchedule: PlanningTask[]): PlanningTask[] {
