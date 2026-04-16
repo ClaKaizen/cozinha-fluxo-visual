@@ -929,9 +929,9 @@ function jointSchedule(
       const busyEquipmentIds = new Set<string>();
       tracker.slots.forEach((slots, eqId) => {
         const minSlot = Math.min(...slots);
-        // If the earliest machine of this type is free > 30min after operators are available,
-        // it's "busy" — deprioritize additional batches on it
-        if (minSlot > earliestOpCursor + 30) {
+        // If the earliest machine of this type is free > 15min after operators are available,
+        // it's "busy" — deprioritize additional batches on it (tighter = more gap-filling)
+        if (minSlot > earliestOpCursor + 15) {
           busyEquipmentIds.add(eqId);
         }
       });
@@ -1005,7 +1005,7 @@ function jointSchedule(
             isBetter = true;
           } else if (onIdleEquip && !bestOnIdleEquip) {
             // Idle equipment strongly preferred over busy equipment
-            isBetter = taskStart <= bestStart + 30;
+            isBetter = taskStart <= bestStart + 15;
           } else if (!onIdleEquip && bestOnIdleEquip) {
             isBetter = false;
           } else if (Math.abs(taskStart - bestStart) <= 10) {
@@ -1193,7 +1193,7 @@ function jointSchedule(
         const earliestOpCursor = Math.min(...operators.map(o => o.cursor));
         const busyEqIds = new Set<string>();
         tracker.slots.forEach((slots, eqId) => {
-          if (Math.min(...slots) > earliestOpCursor + 30) busyEqIds.add(eqId);
+          if (Math.min(...slots) > earliestOpCursor + 15) busyEqIds.add(eqId);
         });
 
         let bestIdx = -1;
@@ -1248,7 +1248,7 @@ function jointSchedule(
 
             let isBetter = false;
             if (bestIdx < 0) isBetter = true;
-            else if (onIdle && !bestOnIdle) isBetter = taskStart <= bestStart + 30;
+            else if (onIdle && !bestOnIdle) isBetter = taskStart <= bestStart + 15;
             else if (!onIdle && bestOnIdle) isBetter = false;
             else if (Math.abs(taskStart - bestStart) <= 10) {
               if (contRatio < bestEqCont - 0.1) isBetter = true;
@@ -1793,27 +1793,145 @@ function buildOperatorSegments(start: number, duration: number, lunchStart: numb
 
 // ── Validation ──────────────────────────────────────────
 
-function validateSchedule(assignments: JointAssignment[]) {
+function validateSchedule(
+  assignments: JointAssignment[],
+  operatorStates: OperatorState[],
+  equipmentMap: Map<string, Equipment>,
+  emergencyEquipmentNames: Set<string>,
+  tasks: PlanningTask[],
+  unscheduledTasks: UnscheduledTask[],
+) {
+  const violations: string[] = [];
+
+  // 1. No operator T.Homem after 15:30
   for (const a of assignments) {
-    if (a.task.operatorDuration > 0 && !a.operatorName) {
-      console.warn(`[Scheduler] Machine task ${a.task.doseLabel} has no operator assigned`);
+    if (a.operatorEnd > OPERATOR_HARD_STOP && a.task.operatorDuration > 0) {
+      violations.push(`OVERTIME: ${a.operatorName} ends at ${formatClock(a.operatorEnd)} for ${a.task.doseLabel}`);
     }
-    if (a.operatorEnd > OPERATOR_HARD_STOP) {
-      console.warn(`[Scheduler] Operator ${a.operatorName} ends at ${formatClock(a.operatorEnd)} (past 15:30) for ${a.task.doseLabel}`);
-    }
-    // HARD CONSTRAINT: machine must never start before operator
-    if (a.task.operatorDuration > 0 && a.operatorName) {
-      const earliestMachine = Math.min(...a.machineAssignments.map(ma => ma.start));
-      if (earliestMachine < a.operatorStart) {
-        console.error(`[Scheduler] VIOLATION: Machine starts at ${formatClock(earliestMachine)} before operator ${a.operatorName} at ${formatClock(a.operatorStart)} for ${a.task.doseLabel}`);
-      }
-    }
+  }
+
+  // 2. No machine blocks after 15:40
+  for (const a of assignments) {
     for (const ma of a.machineAssignments) {
       if (ma.start >= MACHINE_TARGET_STOP) {
-        console.warn(`[Scheduler] Machine block for ${a.task.doseLabel} starts at ${formatClock(ma.start)} (past 15:40)`);
+        violations.push(`MACHINE_OVERFLOW: ${a.task.doseLabel} machine starts at ${formatClock(ma.start)}`);
       }
     }
   }
+
+  // 3. Dose count validation: scheduled + unscheduled == planned
+  const plannedByArticle = new Map<string, number>();
+  for (const t of tasks) {
+    plannedByArticle.set(t.artigo, (plannedByArticle.get(t.artigo) ?? 0) + 1);
+  }
+  const scheduledByArticle = new Map<string, number>();
+  for (const a of assignments) {
+    scheduledByArticle.set(a.task.artigo, (scheduledByArticle.get(a.task.artigo) ?? 0) + 1);
+  }
+  for (const u of unscheduledTasks) {
+    scheduledByArticle.set(u.artigo, (scheduledByArticle.get(u.artigo) ?? 0) + u.dosesRemaining);
+  }
+  for (const [artigo, planned] of plannedByArticle) {
+    const total = scheduledByArticle.get(artigo) ?? 0;
+    if (total !== planned) {
+      violations.push(`DOSE_MISMATCH: ${artigo} — planned ${planned}, got ${total}`);
+    }
+  }
+
+  // 4. startMáquina === startTHomem for every task with operator
+  for (const a of assignments) {
+    if (a.task.operatorDuration > 0 && a.operatorName) {
+      const earliestMachine = Math.min(...a.machineAssignments.map(ma => ma.start));
+      if (earliestMachine < a.operatorStart) {
+        violations.push(`SYNC_VIOLATION: Machine ${formatClock(earliestMachine)} before operator ${a.operatorName} ${formatClock(a.operatorStart)} for ${a.task.doseLabel}`);
+      }
+    }
+  }
+
+  // 5. multiOperador=false → never 2 operators simultaneously on same equipment type
+  const singleOpEquipAssignments = new Map<string, { opName: string; start: number; end: number; label: string }[]>();
+  for (const a of assignments) {
+    const eq = equipmentMap.get(a.task.equipmentId);
+    if (eq && !eq.multiOperador && a.operatorName) {
+      const list = singleOpEquipAssignments.get(a.task.equipmentId) ?? [];
+      list.push({ opName: a.operatorName, start: a.operatorStart, end: a.operatorEnd, label: a.task.doseLabel });
+      singleOpEquipAssignments.set(a.task.equipmentId, list);
+    }
+  }
+  for (const [eqId, list] of singleOpEquipAssignments) {
+    const uniqueOps = new Set(list.map(l => l.opName));
+    if (uniqueOps.size > 1) {
+      violations.push(`MULTI_OP_VIOLATION: Equipment ${eqId} (multiOperador=false) has ${uniqueOps.size} operators: ${[...uniqueOps].join(', ')}`);
+    }
+  }
+
+  // 6. Load balance: max(carga) - min(carga) ≤ 30 min (excluding dedicated single-op)
+  const dedicatedOps = new Set<string>();
+  for (const [eqId, list] of singleOpEquipAssignments) {
+    for (const item of list) dedicatedOps.add(item.opName);
+  }
+  const balanceOps = operatorStates.filter(o => !dedicatedOps.has(o.name) && o.totalWorked > 0);
+  if (balanceOps.length >= 2) {
+    const maxLoad = Math.max(...balanceOps.map(o => o.totalWorked));
+    const minLoad = Math.min(...balanceOps.map(o => o.totalWorked));
+    if (maxLoad - minLoad > 30) {
+      violations.push(`LOAD_IMBALANCE: Δ=${maxLoad - minLoad}min (max ${maxLoad}, min ${minLoad}) — target ≤30min`);
+    }
+  }
+
+  // 7. Lunch: exactly 60 min, lunchStart ≤ 13:00
+  for (const op of operatorStates) {
+    if (op.hadLunch) {
+      const lunchDuration = op.lunchEnd - op.lunchStart;
+      if (lunchDuration !== LUNCH_DURATION_MIN) {
+        violations.push(`LUNCH_DURATION: ${op.name} lunch=${lunchDuration}min (expected ${LUNCH_DURATION_MIN})`);
+      }
+      if (op.lunchStart > LUNCH_LATEST_START) {
+        violations.push(`LUNCH_LATE: ${op.name} lunch starts at ${formatClock(op.lunchStart)} (must be ≤13:00)`);
+      }
+    }
+  }
+
+  // 8. No task interruption (same operator + same artigo blocks must be contiguous)
+  const opArtigoBlocks = new Map<string, { start: number; end: number }[]>();
+  for (const a of assignments) {
+    if (!a.operatorName) continue;
+    const key = `${a.operatorName}:${a.task.artigo}`;
+    const list = opArtigoBlocks.get(key) ?? [];
+    list.push({ start: a.operatorStart, end: a.operatorEnd });
+    opArtigoBlocks.set(key, list);
+  }
+  for (const [key, blocks] of opArtigoBlocks) {
+    if (blocks.length <= 1) continue;
+    blocks.sort((a, b) => a.start - b.start);
+    for (let i = 1; i < blocks.length; i++) {
+      const gap = blocks[i].start - blocks[i - 1].end;
+      // Allow small gaps (lunch or machine cycle wait) but flag large interruptions
+      if (gap > 65) { // 60 min lunch + 5 min tolerance
+        // Check if the gap is just lunch
+        const gapStart = blocks[i - 1].end;
+        const gapEnd = blocks[i].start;
+        const isLunchGap = gapStart <= LUNCH_LATEST_START + LUNCH_DURATION_MIN && gapEnd >= LUNCH_WINDOW_START;
+        if (!isLunchGap) {
+          violations.push(`TASK_INTERRUPTION: ${key} has ${gap}min gap between blocks at ${formatClock(gapStart)}-${formatClock(gapEnd)}`);
+        }
+      }
+    }
+  }
+
+  // 9. Emergency only if overflow proven with normal capacity
+  // (This is validated structurally — emergency only activated after first pass shows overflow)
+
+  // Log all violations
+  for (const v of violations) {
+    if (v.startsWith('SYNC_VIOLATION') || v.startsWith('MULTI_OP_VIOLATION') || v.startsWith('DOSE_MISMATCH')) {
+      console.error(`[Scheduler] ${v}`);
+    } else {
+      console.warn(`[Scheduler] ${v}`);
+    }
+  }
+
+  return violations;
 }
 
 // ── Minimum staffing calculator ─────────────────────────
@@ -2029,8 +2147,7 @@ export function buildDailyGanttSchedule({
   // Run joint optimizer
   const result = jointSchedule(tasks, equipment, equipmentMap, allOpNames, sequencingRules ?? [], lunchSafeCategories ?? []);
 
-  // Validate
-  validateSchedule(result.assignments);
+  // Validate (deferred until after operatorStates are built)
 
   // Build operator states for Gantt
   const operatorStates: OperatorState[] = allOpNames.map((name) => ({
@@ -2055,6 +2172,8 @@ export function buildDailyGanttSchedule({
     ensureLunch(op);
   }
 
+  // Run comprehensive validation
+  validateSchedule(result.assignments, operatorStates, equipmentMap, result.emergencyEquipmentNames, tasks, result.unscheduledTasks);
 
   const gantt = buildGanttFromAssignments(
     result.assignments,
@@ -2069,28 +2188,9 @@ export function buildDailyGanttSchedule({
     lunchSafeCategories ?? [],
   );
 
-  // Determine lunch times from operator states
   const lunchStarts = operatorStates.map((o) => o.lunchStart);
   const lunchStart = lunchStarts.length > 0 ? Math.min(...lunchStarts) : LUNCH_WINDOW_START;
   const lunchEnd = lunchStart + LUNCH_DURATION_MIN;
-
-  // ── Dose validation: ensure scheduled doses match planned quantities ──
-  const dosesByArticle = new Map<string, number>();
-  for (const t of tasks) {
-    dosesByArticle.set(t.artigo, (dosesByArticle.get(t.artigo) ?? 0) + 1);
-  }
-  const scheduledByArticle = new Map<string, number>();
-  for (const a of result.assignments) {
-    scheduledByArticle.set(a.task.artigo, (scheduledByArticle.get(a.task.artigo) ?? 0) + 1);
-  }
-  // Add unscheduled
-  for (const u of result.unscheduledTasks) {
-    scheduledByArticle.set(u.artigo, (scheduledByArticle.get(u.artigo) ?? 0) + u.dosesRemaining);
-  }
-  for (const [artigo, planned] of dosesByArticle) {
-    const total = scheduledByArticle.get(artigo) ?? 0;
-    console.assert(total === planned, `[Scheduler] Overflow de doses: ${artigo} — planeado ${planned}, agendado ${total}`);
-  }
 
   return {
     tasks,
