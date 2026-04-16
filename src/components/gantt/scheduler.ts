@@ -1211,12 +1211,27 @@ function jointSchedule(
         }
       }
 
-      // Use greedy gap-filling (same as tryScheduleAll)
+      // Use greedy gap-filling (same as tryScheduleAll) with deferred retry
       const rem: PlanningTask[] = [];
       const pending = [...tasksToSchedule];
       let maxIter = pending.length * pending.length + pending.length;
+      const deferredPerType: PlanningTask[] = [];
 
-      while (pending.length > 0 && maxIter-- > 0) {
+      while ((pending.length > 0 || deferredPerType.length > 0) && maxIter-- > 0) {
+        // Re-check deferred tasks
+        if (deferredPerType.length > 0) {
+          for (let i = deferredPerType.length - 1; i >= 0; i--) {
+            if (depsScheduled(deferredPerType[i])) {
+              pending.push(deferredPerType.splice(i, 1)[0]);
+            }
+          }
+        }
+        if (pending.length === 0) {
+          rem.push(...deferredPerType);
+          deferredPerType.length = 0;
+          break;
+        }
+
         const earliestOpCursor = Math.min(...operators.map(o => o.cursor));
         const busyEqIds = new Set<string>();
         tracker.slots.forEach((slots, eqId) => {
@@ -1236,7 +1251,6 @@ function jointSchedule(
           const depMinStart = getMinStartForTask(task);
           const primaryEqId = task.equipmentId;
 
-          // Operator continuity + group preference
           let preferredOpName: string | undefined;
           let strictPref = false;
           const committedOp = getCommittedOperator(task);
@@ -1299,11 +1313,12 @@ function jointSchedule(
           const hasUnmetDeps = pending.some(t => !depsScheduled(t));
           if (hasUnmetDeps) {
             for (let i = pending.length - 1; i >= 0; i--) {
-              if (!depsScheduled(pending[i])) rem.push(...pending.splice(i, 1));
+              if (!depsScheduled(pending[i])) deferredPerType.push(...pending.splice(i, 1));
             }
             continue;
           }
           rem.push(...pending);
+          pending.length = 0;
           break;
         }
 
@@ -1346,6 +1361,7 @@ function jointSchedule(
       }
 
       rem.push(...pending);
+      rem.push(...deferredPerType);
       return rem;
     }
 
