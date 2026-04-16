@@ -1041,7 +1041,8 @@ function tryJointSlot(
       const prefOp = operators.find(o => o.name === preferredOperator);
       if (prefOp) {
         const opStart = getOperatorEarliestStart(prefOp, machineStart, task.operatorDuration);
-        if (opStart >= 0 && opStart <= machineStart + 5) {
+        if (opStart >= 0) {
+          // In strict mode: only this operator, wait for them even if others are free
           bestOp = prefOp;
           bestOpStart = opStart;
           bestOpLoad = prefOp.totalWorked;
@@ -1049,8 +1050,8 @@ function tryJointSlot(
       }
     }
 
-    // If preferred didn't work, try all operators
-    if (!bestOp) {
+    // If preferred didn't work (or no preferred), try all operators — but NOT if strict
+    if (!bestOp && !strictPreferred) {
       for (const op of operators) {
         const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration);
         if (opStart < 0) continue;
@@ -1066,20 +1067,24 @@ function tryJointSlot(
     }
 
     if (bestOp) {
-      // Exact or near-exact alignment found
       const opStart = getOperatorEarliestStart(bestOp, machineStart, task.operatorDuration);
-      return {
-        task,
-        machineAssignments: machineResult.allAssignments,
-        operatorName: bestOp.name,
-        operatorStart: opStart,
-        operatorEnd: opStart + task.operatorDuration,
-      };
+      if (opStart >= 0) {
+        return {
+          task,
+          machineAssignments: machineResult.allAssignments,
+          operatorName: bestOp.name,
+          operatorStart: opStart,
+          operatorEnd: opStart + task.operatorDuration,
+        };
+      }
     }
 
     // No operator available at machineStart - find earliest operator availability
     let nextOpAvail = Infinity;
-    for (const op of operators) {
+    const searchOps = strictPreferred && preferredOperator
+      ? operators.filter(o => o.name === preferredOperator)
+      : operators;
+    for (const op of searchOps) {
       const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration);
       if (opStart >= 0 && opStart < nextOpAvail) {
         nextOpAvail = opStart;
