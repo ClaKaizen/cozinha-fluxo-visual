@@ -1070,49 +1070,97 @@ function jointSchedule(
         }
       }
 
+      // Use greedy gap-filling (same as tryScheduleAll)
       const rem: PlanningTask[] = [];
-      for (const task of tasksToSchedule) {
-        const depMinStart = getMinStartForTask(task);
-        const primaryEqId = task.equipmentId;
-        const preferredOp = getPreferredOperator(primaryEqId);
-        // allowEmergency=true here because createMachineTracker already has per-type slots
-        const result = tryJointSlot(task, tracker, operators, equipmentMap, true, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
-        if (result) {
-          for (const ma of result.machineAssignments) {
-            const slots = tracker.slots.get(ma.booking.equipmentId);
-            if (slots) slots[ma.machineIdx] = ma.end;
-            if (ma.booking.isDedicated) {
-              const dedKey = `${task.categoryId}:${ma.booking.equipmentId}:ded`;
-              if (!tracker.dedicatedSlots.has(dedKey)) tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
+      const pending = [...tasksToSchedule];
+      let maxIter = pending.length * pending.length + pending.length;
+
+      while (pending.length > 0 && maxIter-- > 0) {
+        const earliestOpCursor = Math.min(...operators.map(o => o.cursor));
+        const busyEqIds = new Set<string>();
+        tracker.slots.forEach((slots, eqId) => {
+          if (Math.min(...slots) > earliestOpCursor + 30) busyEqIds.add(eqId);
+        });
+
+        let bestIdx = -1;
+        let bestResult: JointAssignment | null = null;
+        let bestStart = Infinity;
+        let bestOnIdle = false;
+
+        for (let ti = 0; ti < pending.length; ti++) {
+          const task = pending[ti];
+          if (!depsScheduled(task)) continue;
+          const depMinStart = getMinStartForTask(task);
+          const primaryEqId = task.equipmentId;
+          const preferredOp = getPreferredOperator(primaryEqId);
+          const result = tryJointSlot(task, tracker, operators, equipmentMap, true, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
+          if (result) {
+            const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
+            const onIdle = !busyEqIds.has(primaryEqId);
+            let isBetter = false;
+            if (bestIdx < 0) isBetter = true;
+            else if (onIdle && !bestOnIdle) isBetter = taskStart <= bestStart + 60;
+            else if (!onIdle && bestOnIdle) isBetter = false;
+            else isBetter = taskStart < bestStart;
+            if (isBetter) {
+              bestStart = taskStart;
+              bestResult = result;
+              bestIdx = ti;
+              bestOnIdle = onIdle;
             }
           }
-          const cookingA = result.machineAssignments.find((ma) => ma.pairRole === "cooking");
-          const coolingA = result.machineAssignments.find((ma) => ma.pairRole === "cooling");
-          if (cookingA && coolingA) {
-            tracker.pairPreferences.set(
-              getPairPreferenceKey(task.categoryId, cookingA.booking.equipmentId, coolingA.booking.equipmentId),
-              { primaryMachineIdx: cookingA.machineIdx, pairedMachineIdx: coolingA.machineIdx },
-            );
-          }
-          if (result.operatorName && task.operatorDuration > 0) {
-            const op = operators.find((o) => o.name === result.operatorName)!;
-            if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
-            registerGroupOperator(primaryEqId, result.operatorName);
-          }
-          for (const ma of result.machineAssignments) {
-            const eqItem = equipmentMap.get(ma.booking.equipmentId);
-            if (eqItem && ma.machineIdx >= eqItem.quantidade) {
-              emergencyEquipmentNames.add(eqItem.nome);
-            }
-          }
-          const maxEnd = Math.max(...result.machineAssignments.map(ma => ma.end));
-          const prevEnd = scheduledCategoryEndTimes.get(task.categoryId) ?? 0;
-          scheduledCategoryEndTimes.set(task.categoryId, Math.max(prevEnd, maxEnd));
-          assignments.push(result);
-        } else {
-          rem.push(task);
         }
+
+        if (bestIdx < 0) {
+          const hasUnmetDeps = pending.some(t => !depsScheduled(t));
+          if (hasUnmetDeps) {
+            for (let i = pending.length - 1; i >= 0; i--) {
+              if (!depsScheduled(pending[i])) rem.push(...pending.splice(i, 1));
+            }
+            continue;
+          }
+          rem.push(...pending);
+          break;
+        }
+
+        const task = pending[bestIdx];
+        const result = bestResult!;
+        pending.splice(bestIdx, 1);
+
+        for (const ma of result.machineAssignments) {
+          const slots = tracker.slots.get(ma.booking.equipmentId);
+          if (slots) slots[ma.machineIdx] = ma.end;
+          if (ma.booking.isDedicated) {
+            const dedKey = `${task.categoryId}:${ma.booking.equipmentId}:ded`;
+            if (!tracker.dedicatedSlots.has(dedKey)) tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
+          }
+        }
+        const cookingA = result.machineAssignments.find((ma) => ma.pairRole === "cooking");
+        const coolingA = result.machineAssignments.find((ma) => ma.pairRole === "cooling");
+        if (cookingA && coolingA) {
+          tracker.pairPreferences.set(
+            getPairPreferenceKey(task.categoryId, cookingA.booking.equipmentId, coolingA.booking.equipmentId),
+            { primaryMachineIdx: cookingA.machineIdx, pairedMachineIdx: coolingA.machineIdx },
+          );
+        }
+        if (result.operatorName && task.operatorDuration > 0) {
+          const op = operators.find((o) => o.name === result.operatorName)!;
+          if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
+          registerGroupOperator(task.equipmentId, result.operatorName);
+        }
+        for (const ma of result.machineAssignments) {
+          const eqItem = equipmentMap.get(ma.booking.equipmentId);
+          if (eqItem && ma.machineIdx >= eqItem.quantidade) {
+            emergencyEquipmentNames.add(eqItem.nome);
+          }
+        }
+        const maxEnd = Math.max(...result.machineAssignments.map(ma => ma.end));
+        const prevEnd = scheduledCategoryEndTimes.get(task.categoryId) ?? 0;
+        scheduledCategoryEndTimes.set(task.categoryId, Math.max(prevEnd, maxEnd));
+        assignments.push(result);
       }
+
+      rem.push(...pending);
       return rem;
     }
 
