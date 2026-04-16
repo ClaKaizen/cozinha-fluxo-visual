@@ -1194,12 +1194,20 @@ function jointSchedule(
             const groupPref = getPreferredOperator(primaryEqId);
             if (groupPref) { preferredOpName = groupPref.name; strictPref = groupPref.strict; }
           }
+          const excludedOps = new Set<string>();
+          for (const opName of dedicatedSingleOpEquipOperators) {
+            const assignedToThisEquip = (equipmentGroupOperators.get(primaryEqId) ?? []).includes(opName);
+            if (!assignedToThisEquip) excludedOps.add(opName);
+          }
+          for (const op of operators) {
+            if (isOperatorCommittedElsewhere(op.name, task)) excludedOps.add(op.name);
+          }
           if (!committedOp) {
-            const freeOps = operators.filter(o => !isOperatorCommittedElsewhere(o.name, task));
-            if (freeOps.length === 0 && operators.length > 0) continue;
+            const availOps = operators.filter(o => !excludedOps.has(o.name));
+            if (availOps.length === 0 && operators.length > 0) continue;
           }
 
-          const result = tryJointSlot(task, tracker, operators, equipmentMap, true, equipment, depMinStart, preferredOpName, lunchSafeCategories, strictPref);
+          const result = tryJointSlot(task, tracker, operators, equipmentMap, true, equipment, depMinStart, preferredOpName, lunchSafeCategories, strictPref, excludedOps);
           if (result) {
             if (result.operatorName && isOperatorCommittedElsewhere(result.operatorName, task)) continue;
             const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
