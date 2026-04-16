@@ -2175,6 +2175,22 @@ export function buildDailyGanttSchedule({
   // Run comprehensive validation
   validateSchedule(result.assignments, operatorStates, equipmentMap, result.emergencyEquipmentNames, tasks, result.unscheduledTasks);
 
+  const gantt = buildGanttFromAssignments(
+    result.assignments,
+    equipment,
+    equipmentMap,
+    allOpNames,
+    operatorStates,
+    result.overflowTasks,
+    result.unscheduledTasks,
+    result.emergencyEquipmentNames,
+    result.staffingWarning,
+    lunchSafeCategories ?? [],
+  );
+
+  const lunchStarts = operatorStates.map((o) => o.lunchStart);
+  const lunchStart = lunchStarts.length > 0 ? Math.min(...lunchStarts) : LUNCH_WINDOW_START;
+  const lunchEnd = lunchStart + LUNCH_DURATION_MIN;
 
   return {
     tasks,
