@@ -920,7 +920,26 @@ function jointSchedule(
     // Greedy earliest-start with gap-filling: prefer tasks on idle equipment
     // over tasks on equipment with active long machine runs
     let maxIterations = pending.length * pending.length + pending.length;
-    while (pending.length > 0 && maxIterations-- > 0) {
+    // Track deferred tasks separately — they may become schedulable after deps resolve
+    const deferred: PlanningTask[] = [];
+
+    while ((pending.length > 0 || deferred.length > 0) && maxIterations-- > 0) {
+      // Re-check deferred tasks: move those with now-satisfied deps back to pending
+      if (deferred.length > 0) {
+        for (let i = deferred.length - 1; i >= 0; i--) {
+          if (depsScheduled(deferred[i])) {
+            pending.push(deferred.splice(i, 1)[0]);
+          }
+        }
+      }
+
+      if (pending.length === 0) {
+        // All remaining tasks are deferred with unmet deps that will never resolve
+        remaining.push(...deferred);
+        deferred.length = 0;
+        break;
+      }
+
       // Determine the earliest operator cursor (= when operators become free)
       const earliestOpCursor = Math.min(...operators.map(o => o.cursor));
 
@@ -1030,23 +1049,30 @@ function jointSchedule(
             bestOpLoad = opLoad;
             bestEqContention = contentionRatio;
           }
+        } else {
+          // Log why task couldn't be scheduled
+          console.warn(`[Scheduler] tryJointSlot returned null for "${task.doseLabel}" (equip: ${task.equipmentName}, tHomem: ${task.operatorDuration}min, tMaq: ${task.machineDuration}min)`);
         }
       }
 
       if (bestIdx < 0) {
-        // No task could be scheduled — check if any have unmet deps that might resolve
+        // No task could be scheduled in this iteration
         const hasUnmetDeps = pending.some(t => !depsScheduled(t));
         if (hasUnmetDeps) {
-          // Move tasks with unmet deps to remaining
+          // Move tasks with unmet deps to deferred (NOT remaining) — they may resolve later
           for (let i = pending.length - 1; i >= 0; i--) {
             if (!depsScheduled(pending[i])) {
-              remaining.push(...pending.splice(i, 1));
+              deferred.push(...pending.splice(i, 1));
             }
           }
           continue;
         }
-        // All truly unschedulable
+        // All truly unschedulable — log them
+        for (const t of pending) {
+          console.warn(`[Scheduler] UNSCHEDULABLE: "${t.doseLabel}" (equip: ${t.equipmentName}, cat: ${t.categoryName})`);
+        }
         remaining.push(...pending);
+        pending.length = 0;
         break;
       }
 
@@ -1102,8 +1128,9 @@ function jointSchedule(
       assignments.push(result);
     }
 
-    // Any leftover pending tasks
+    // Any leftover pending + deferred tasks
     remaining.push(...pending);
+    remaining.push(...deferred);
     return remaining;
   }
 
@@ -1184,12 +1211,27 @@ function jointSchedule(
         }
       }
 
-      // Use greedy gap-filling (same as tryScheduleAll)
+      // Use greedy gap-filling (same as tryScheduleAll) with deferred retry
       const rem: PlanningTask[] = [];
       const pending = [...tasksToSchedule];
       let maxIter = pending.length * pending.length + pending.length;
+      const deferredPerType: PlanningTask[] = [];
 
-      while (pending.length > 0 && maxIter-- > 0) {
+      while ((pending.length > 0 || deferredPerType.length > 0) && maxIter-- > 0) {
+        // Re-check deferred tasks
+        if (deferredPerType.length > 0) {
+          for (let i = deferredPerType.length - 1; i >= 0; i--) {
+            if (depsScheduled(deferredPerType[i])) {
+              pending.push(deferredPerType.splice(i, 1)[0]);
+            }
+          }
+        }
+        if (pending.length === 0) {
+          rem.push(...deferredPerType);
+          deferredPerType.length = 0;
+          break;
+        }
+
         const earliestOpCursor = Math.min(...operators.map(o => o.cursor));
         const busyEqIds = new Set<string>();
         tracker.slots.forEach((slots, eqId) => {
@@ -1209,7 +1251,6 @@ function jointSchedule(
           const depMinStart = getMinStartForTask(task);
           const primaryEqId = task.equipmentId;
 
-          // Operator continuity + group preference
           let preferredOpName: string | undefined;
           let strictPref = false;
           const committedOp = getCommittedOperator(task);
@@ -1272,11 +1313,12 @@ function jointSchedule(
           const hasUnmetDeps = pending.some(t => !depsScheduled(t));
           if (hasUnmetDeps) {
             for (let i = pending.length - 1; i >= 0; i--) {
-              if (!depsScheduled(pending[i])) rem.push(...pending.splice(i, 1));
+              if (!depsScheduled(pending[i])) deferredPerType.push(...pending.splice(i, 1));
             }
             continue;
           }
           rem.push(...pending);
+          pending.length = 0;
           break;
         }
 
@@ -1319,6 +1361,7 @@ function jointSchedule(
       }
 
       rem.push(...pending);
+      rem.push(...deferredPerType);
       return rem;
     }
 
@@ -1967,6 +2010,7 @@ export function calculateMinimumStaffing(input: Omit<BuildScheduleInput, 'operat
   });
 
   const baseEstimate = Math.max(1, Math.ceil(totalTHomemMin / OPERATOR_PRODUCTIVE_MINUTES));
+  console.log(`[Staffing] Carga T.Homem total: ${totalTHomemMin}min (${(totalTHomemMin / 60).toFixed(1)}h), base estimate: ${baseEstimate} pessoas`);
 
   // Iteratively try N operators using the real scheduler
   for (let n = baseEstimate; n <= MAX_STAFFING_SEARCH; n++) {
@@ -1990,12 +2034,18 @@ export function calculateMinimumStaffing(input: Omit<BuildScheduleInput, 'operat
     });
 
     // Feasible = no overtime, no overflow, no unscheduled
-    if (!result.hasOvertime && result.overflowTasks.length === 0 && result.unscheduledTasks.length === 0) {
+    const feasible = !result.hasOvertime && result.overflowTasks.length === 0 && result.unscheduledTasks.length === 0;
+    if (!feasible) {
+      console.log(`[Staffing] n=${n}: NOT feasible — overtime=${result.hasOvertime}, overflow=${result.overflowTasks.length} (${result.overflowTasks.slice(0, 3).join(', ')}), unscheduled=${result.unscheduledTasks.length}`);
+    }
+    if (feasible) {
+      console.log(`[Staffing] n=${n}: FEASIBLE — Pessoas necessárias = ${n}`);
       return { pessoasNecessarias: n, feasible: true };
     }
   }
 
   // Never feasible within bounds
+  console.warn(`[Staffing] Infeasible even with ${MAX_STAFFING_SEARCH} operators`);
   return {
     pessoasNecessarias: MAX_STAFFING_SEARCH,
     feasible: false,
