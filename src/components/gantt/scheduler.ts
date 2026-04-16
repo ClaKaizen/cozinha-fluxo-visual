@@ -970,6 +970,7 @@ function tryJointSlot(
   minStartOverride: number = DAY_START,
   preferredOperator?: string,
   lunchSafeCategoryIds: string[] = [],
+  strictPreferred: boolean = false,
 ): JointAssignment | null {
   const isLunchSafe = lunchSafeCategoryIds.includes(task.categoryId);
   const phases = buildBookingPhases(task);
