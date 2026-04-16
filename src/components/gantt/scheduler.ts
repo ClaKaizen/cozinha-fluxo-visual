@@ -1633,10 +1633,20 @@ export function buildDailyGanttSchedule({
       const machine = cat ? equipmentMap.get(cat.equipamentoId) : undefined;
       if (!cat || !machine) return;
 
-      for (let i = 0; i < entry.quantidade; i++) {
+      const nCiclos = Math.ceil(entry.quantidade);
+      for (let i = 0; i < nCiclos; i++) {
         const isFirst = i === 0;
-        const tHomem = isFirst ? (cat.tempoCicloHomem1 ?? cat.tempoCicloHomem) : cat.tempoCicloHomem;
-        const tMaqPrimary = isFirst ? (cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina) : cat.tempoCicloMaquina;
+        const isLast = i === nCiclos - 1;
+        // Fraction for the last partial cycle (e.g. 0.2 for 2.2 doses)
+        const fraction = isLast && entry.quantidade % 1 !== 0
+          ? entry.quantidade - Math.floor(entry.quantidade)
+          : 1;
+
+        const tHomemFull = isFirst ? (cat.tempoCicloHomem1 ?? cat.tempoCicloHomem) : cat.tempoCicloHomem;
+        const tMaqPrimaryFull = isFirst ? (cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina) : cat.tempoCicloMaquina;
+        // Scale durations for partial last cycle
+        const tHomem = fraction < 1 ? Math.max(1, Math.round(tHomemFull * fraction)) : tHomemFull;
+        const tMaqPrimary = fraction < 1 ? Math.max(1, Math.round(tMaqPrimaryFull * fraction)) : tMaqPrimaryFull;
         const primaryColorIndex = (equipmentIndex.get(machine.id) ?? 0) % 6;
 
         const bookings: MachineBooking[] = [];
@@ -1654,9 +1664,10 @@ export function buildDailyGanttSchedule({
           for (const extra of cat.equipamentos) {
             const extraEq = equipmentMap.get(extra.equipamentoId);
             if (!extraEq) continue;
-            const extraDuration = isFirst
+            const extraDurationFull = isFirst
               ? (extra.tempoCicloMaquina1 ?? extra.tempoCicloMaquina)
               : extra.tempoCicloMaquina;
+            const extraDuration = fraction < 1 ? Math.max(1, Math.round(extraDurationFull * fraction)) : extraDurationFull;
             if (extraDuration <= 0) continue;
             const isFirstPhase = extra.isFirst ?? false;
             bookings.push({
@@ -1685,10 +1696,22 @@ export function buildDailyGanttSchedule({
         const simMax = simBookings.length > 0 ? Math.max(...simBookings.map((b) => b.duration)) : 0;
         const totalMachineDuration = seqTotal + simMax;
 
+        // Dose label: show fraction for partial cycles
+        const doseNumber = i + 1;
+        const totalDisplay = entry.quantidade % 1 !== 0
+          ? entry.quantidade.toFixed(1)
+          : String(entry.quantidade);
+        const doseDisplay = isLast && fraction < 1
+          ? `${fraction.toFixed(1)}`
+          : String(doseNumber);
+        const doseLabel = nCiclos > 1
+          ? `${entry.artigo} (${doseDisplay}/${totalDisplay})`
+          : entry.artigo;
+
         tasks.push({
           id: `${entry.id}-d${i}`,
           artigo: entry.artigo,
-          doseLabel: entry.quantidade > 1 ? `${entry.artigo} (${i + 1}/${entry.quantidade})` : entry.artigo,
+          doseLabel,
           equipmentId: machine.id,
           equipmentName: machine.nome,
           categoryName: cat.nome,
