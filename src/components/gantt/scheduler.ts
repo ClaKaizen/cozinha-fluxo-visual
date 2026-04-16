@@ -929,9 +929,9 @@ function jointSchedule(
       const busyEquipmentIds = new Set<string>();
       tracker.slots.forEach((slots, eqId) => {
         const minSlot = Math.min(...slots);
-        // If the earliest machine of this type is free > 30min after operators are available,
-        // it's "busy" — deprioritize additional batches on it
-        if (minSlot > earliestOpCursor + 30) {
+        // If the earliest machine of this type is free > 15min after operators are available,
+        // it's "busy" — deprioritize additional batches on it (tighter = more gap-filling)
+        if (minSlot > earliestOpCursor + 15) {
           busyEquipmentIds.add(eqId);
         }
       });
@@ -1193,7 +1193,7 @@ function jointSchedule(
         const earliestOpCursor = Math.min(...operators.map(o => o.cursor));
         const busyEqIds = new Set<string>();
         tracker.slots.forEach((slots, eqId) => {
-          if (Math.min(...slots) > earliestOpCursor + 30) busyEqIds.add(eqId);
+          if (Math.min(...slots) > earliestOpCursor + 15) busyEqIds.add(eqId);
         });
 
         let bestIdx = -1;
