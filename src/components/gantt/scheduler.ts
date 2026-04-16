@@ -2010,6 +2010,7 @@ export function calculateMinimumStaffing(input: Omit<BuildScheduleInput, 'operat
   });
 
   const baseEstimate = Math.max(1, Math.ceil(totalTHomemMin / OPERATOR_PRODUCTIVE_MINUTES));
+  console.log(`[Staffing] Carga T.Homem total: ${totalTHomemMin}min (${(totalTHomemMin / 60).toFixed(1)}h), base estimate: ${baseEstimate} pessoas`);
 
   // Iteratively try N operators using the real scheduler
   for (let n = baseEstimate; n <= MAX_STAFFING_SEARCH; n++) {
@@ -2033,12 +2034,18 @@ export function calculateMinimumStaffing(input: Omit<BuildScheduleInput, 'operat
     });
 
     // Feasible = no overtime, no overflow, no unscheduled
-    if (!result.hasOvertime && result.overflowTasks.length === 0 && result.unscheduledTasks.length === 0) {
+    const feasible = !result.hasOvertime && result.overflowTasks.length === 0 && result.unscheduledTasks.length === 0;
+    if (!feasible) {
+      console.log(`[Staffing] n=${n}: NOT feasible — overtime=${result.hasOvertime}, overflow=${result.overflowTasks.length} (${result.overflowTasks.slice(0, 3).join(', ')}), unscheduled=${result.unscheduledTasks.length}`);
+    }
+    if (feasible) {
+      console.log(`[Staffing] n=${n}: FEASIBLE — Pessoas necessárias = ${n}`);
       return { pessoasNecessarias: n, feasible: true };
     }
   }
 
   // Never feasible within bounds
+  console.warn(`[Staffing] Infeasible even with ${MAX_STAFFING_SEARCH} operators`);
   return {
     pessoasNecessarias: MAX_STAFFING_SEARCH,
     feasible: false,
