@@ -1145,9 +1145,26 @@ function jointSchedule(
           if (!depsScheduled(task)) continue;
           const depMinStart = getMinStartForTask(task);
           const primaryEqId = task.equipmentId;
-          const preferredOp = getPreferredOperator(primaryEqId);
-          const result = tryJointSlot(task, tracker, operators, equipmentMap, true, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
+
+          // Operator continuity + group preference
+          let preferredOpName: string | undefined;
+          let strictPref = false;
+          const committedOp = getCommittedOperator(task);
+          if (committedOp) {
+            preferredOpName = committedOp;
+            strictPref = true;
+          } else {
+            const groupPref = getPreferredOperator(primaryEqId);
+            if (groupPref) { preferredOpName = groupPref.name; strictPref = groupPref.strict; }
+          }
+          if (!committedOp) {
+            const freeOps = operators.filter(o => !isOperatorCommittedElsewhere(o.name, task));
+            if (freeOps.length === 0 && operators.length > 0) continue;
+          }
+
+          const result = tryJointSlot(task, tracker, operators, equipmentMap, true, equipment, depMinStart, preferredOpName, lunchSafeCategories, strictPref);
           if (result) {
+            if (result.operatorName && isOperatorCommittedElsewhere(result.operatorName, task)) continue;
             const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
             const onIdle = !busyEqIds.has(primaryEqId);
             let isBetter = false;
