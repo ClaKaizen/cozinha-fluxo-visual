@@ -1005,7 +1005,7 @@ function jointSchedule(
             isBetter = true;
           } else if (onIdleEquip && !bestOnIdleEquip) {
             // Idle equipment strongly preferred over busy equipment
-            isBetter = taskStart <= bestStart + 30;
+            isBetter = taskStart <= bestStart + 15;
           } else if (!onIdleEquip && bestOnIdleEquip) {
             isBetter = false;
           } else if (Math.abs(taskStart - bestStart) <= 10) {
@@ -1248,7 +1248,7 @@ function jointSchedule(
 
             let isBetter = false;
             if (bestIdx < 0) isBetter = true;
-            else if (onIdle && !bestOnIdle) isBetter = taskStart <= bestStart + 30;
+            else if (onIdle && !bestOnIdle) isBetter = taskStart <= bestStart + 15;
             else if (!onIdle && bestOnIdle) isBetter = false;
             else if (Math.abs(taskStart - bestStart) <= 10) {
               if (contRatio < bestEqCont - 0.1) isBetter = true;
