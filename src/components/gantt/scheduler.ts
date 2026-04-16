@@ -1200,6 +1200,8 @@ function jointSchedule(
         let bestResult: JointAssignment | null = null;
         let bestStart = Infinity;
         let bestOnIdle = false;
+        let bestOpLoad = Infinity;
+        let bestEqCont = Infinity;
 
         for (let ti = 0; ti < pending.length; ti++) {
           const task = pending[ti];
@@ -1236,16 +1238,32 @@ function jointSchedule(
             if (result.operatorName && isOperatorCommittedElsewhere(result.operatorName, task)) continue;
             const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
             const onIdle = !busyEqIds.has(primaryEqId);
+
+            const assignedOp = operators.find(o => o.name === result.operatorName);
+            const opLoad = assignedOp?.totalWorked ?? 0;
+            const eqCont = equipContention.get(primaryEqId) ?? 0;
+            const eq = equipmentMap.get(primaryEqId);
+            const eqCap = eq ? eq.quantidade * AVAILABLE_MACHINE_MINUTES : 1;
+            const contRatio = eqCont / eqCap;
+
             let isBetter = false;
             if (bestIdx < 0) isBetter = true;
-            else if (onIdle && !bestOnIdle) isBetter = taskStart <= bestStart + 60;
+            else if (onIdle && !bestOnIdle) isBetter = taskStart <= bestStart + 30;
             else if (!onIdle && bestOnIdle) isBetter = false;
-            else isBetter = taskStart < bestStart;
+            else if (Math.abs(taskStart - bestStart) <= 10) {
+              if (contRatio < bestEqCont - 0.1) isBetter = true;
+              else if (contRatio > bestEqCont + 0.1) isBetter = false;
+              else isBetter = opLoad < bestOpLoad;
+            } else {
+              isBetter = taskStart < bestStart;
+            }
             if (isBetter) {
               bestStart = taskStart;
               bestResult = result;
               bestIdx = ti;
               bestOnIdle = onIdle;
+              bestOpLoad = opLoad;
+              bestEqCont = contRatio;
             }
           }
         }
