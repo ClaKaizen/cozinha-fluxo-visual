@@ -329,7 +329,7 @@ function OperatorGanttSection({
     <div className="overflow-x-auto">
       <div style={{ minWidth: labelWidth + chartWidth + 24 }}>
         <div className="relative mb-2" style={{ marginLeft: labelWidth, height: 18 }}>
-          {markers.filter((m) => m % 60 === 0).map((m) => (
+          {markers.filter((m) => m === OPERATOR_START || m % 60 === 0).map((m) => (
             <div key={m} className="absolute text-[10px] font-medium text-muted-foreground" style={{ left: `${toPercent(m)}%`, transform: "translateX(-50%)" }}>
               {formatClock(m)}
             </div>
