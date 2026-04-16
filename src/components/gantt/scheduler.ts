@@ -1711,6 +1711,13 @@ function validateSchedule(assignments: JointAssignment[]) {
     if (a.operatorEnd > OPERATOR_HARD_STOP) {
       console.warn(`[Scheduler] Operator ${a.operatorName} ends at ${formatClock(a.operatorEnd)} (past 15:30) for ${a.task.doseLabel}`);
     }
+    // HARD CONSTRAINT: machine must never start before operator
+    if (a.task.operatorDuration > 0 && a.operatorName) {
+      const earliestMachine = Math.min(...a.machineAssignments.map(ma => ma.start));
+      if (earliestMachine < a.operatorStart) {
+        console.error(`[Scheduler] VIOLATION: Machine starts at ${formatClock(earliestMachine)} before operator ${a.operatorName} at ${formatClock(a.operatorStart)} for ${a.task.doseLabel}`);
+      }
+    }
     for (const ma of a.machineAssignments) {
       if (ma.start >= MACHINE_TARGET_STOP) {
         console.warn(`[Scheduler] Machine block for ${a.task.doseLabel} starts at ${formatClock(ma.start)} (past 15:40)`);
