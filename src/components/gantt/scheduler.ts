@@ -1176,27 +1176,18 @@ function tryJointSlot(
     // Check if machine start is past hard stop
     if (machineStart >= MACHINE_TARGET_STOP) break;
 
-    // Lunch constraint: non-lunch-safe tasks cannot have machines running during the actual 1-hour lunch block
+    // Lunch constraint: only block if the OPERATOR's T.Homem would cross lunch.
+    // The machine can run autonomously during lunch once T.Homem is done.
     if (!isLunchSafe && task.operatorDuration > 0) {
       const lunchBlockStart = LUNCH_WINDOW_START;
       const lunchBlockEnd = LUNCH_WINDOW_START + LUNCH_DURATION_MIN;
 
-      const anyOverlapsLunch = machineResult.allAssignments.some((a) =>
-        a.start < lunchBlockEnd && a.end > lunchBlockStart
-      );
-
-      if (anyOverlapsLunch) {
-        const operatorEndIfStartedNow = machineStart + task.operatorDuration;
-
-        if (operatorEndIfStartedNow > lunchBlockStart && machineStart < lunchBlockStart) {
-          candidateTime = lunchBlockEnd;
-          continue;
-        }
-
-        if (machineStart < lunchBlockStart && machineEnd > lunchBlockStart) {
-          candidateTime = lunchBlockEnd;
-          continue;
-        }
+      // Check if the operator's work portion (not the full machine duration) crosses lunch
+      const operatorEndIfStartedNow = machineStart + task.operatorDuration;
+      if (machineStart < lunchBlockStart && operatorEndIfStartedNow > lunchBlockStart) {
+        // Operator T.Homem would cross into lunch — push to after lunch
+        candidateTime = lunchBlockEnd;
+        continue;
       }
     }
 
