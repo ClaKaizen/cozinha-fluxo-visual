@@ -930,13 +930,97 @@ function jointSchedule(
     remaining = [...remaining, ...tryScheduleAll(false, circularTasks)];
   }
 
-  // Phase with emergency machines for remaining tasks
-  if (remaining.length > 0) {
-    const hasEmergency = equipment.some((eq) => eq.quantidadeEmergencia > 0);
-    if (hasEmergency) {
-      const opsFree = operators.some((op) => op.totalWorked < OPERATOR_PRODUCTIVE_MINUTES - 10);
-      if (opsFree) {
-        remaining = tryScheduleAll(true, remaining);
+  // ── Emergency auto-activation ──
+  // Check if any scheduled assignment overflows (machine > 15:40 or operator > 15:30)
+  const hasEmergencyEquip = equipment.some((eq) => eq.quantidadeEmergencia > 0);
+  const hasOverflowInAssignments = assignments.some((a) => {
+    const machineOverflow = a.machineAssignments.some((ma) => ma.end > MACHINE_TARGET_STOP);
+    const operatorOverflow = a.operatorEnd > OPERATOR_HARD_STOP;
+    return machineOverflow || operatorOverflow;
+  });
+
+  if ((remaining.length > 0 || hasOverflowInAssignments) && hasEmergencyEquip) {
+    // Save current state, then try full re-run with emergency enabled
+    const savedAssignments = [...assignments];
+    const savedOverflow = [...overflowTasks];
+    const savedUnscheduled = [...unscheduledTasks];
+    const savedEmergencyNames = new Set(emergencyEquipmentNames);
+
+    // Reset state for emergency re-run
+    assignments.length = 0;
+    overflowTasks.length = 0;
+    unscheduledTasks.length = 0;
+    emergencyEquipmentNames.clear();
+    scheduledCategoryEndTimes.clear();
+    equipmentGroupOperators.clear();
+
+    // Reset operators
+    for (const op of operators) {
+      op.cursor = DAY_START;
+      op.totalWorked = 0;
+      op.hadLunch = false;
+      op.lunchStart = sharedLunchStart;
+      op.lunchEnd = sharedLunchStart + LUNCH_DURATION_MIN;
+    }
+
+    // Re-run all passes with emergency
+    let emergRemaining = tryScheduleAll(true, pass1Tasks);
+    if (deferredTasks.length > 0) {
+      emergRemaining = [...emergRemaining, ...tryScheduleAll(true, deferredTasks)];
+    }
+    if (circularTasks.length > 0) {
+      emergRemaining = [...emergRemaining, ...tryScheduleAll(true, circularTasks)];
+    }
+
+    // Check if emergency run is better (less overflow)
+    const emergHasOverflow = assignments.some((a) => {
+      return a.machineAssignments.some((ma) => ma.end > MACHINE_TARGET_STOP) || a.operatorEnd > OPERATOR_HARD_STOP;
+    });
+
+    const normalProblems = savedAssignments.filter((a) =>
+      a.machineAssignments.some((ma) => ma.end > MACHINE_TARGET_STOP) || a.operatorEnd > OPERATOR_HARD_STOP
+    ).length + remaining.length;
+
+    const emergProblems = assignments.filter((a) =>
+      a.machineAssignments.some((ma) => ma.end > MACHINE_TARGET_STOP) || a.operatorEnd > OPERATOR_HARD_STOP
+    ).length + emergRemaining.length;
+
+    if (emergProblems < normalProblems) {
+      // Emergency is better — keep it
+      remaining = emergRemaining;
+    } else {
+      // Normal was same or better — revert
+      assignments.length = 0;
+      assignments.push(...savedAssignments);
+      overflowTasks.length = 0;
+      overflowTasks.push(...savedOverflow);
+      unscheduledTasks.length = 0;
+      unscheduledTasks.push(...savedUnscheduled);
+      emergencyEquipmentNames.clear();
+      savedEmergencyNames.forEach((n) => emergencyEquipmentNames.add(n));
+
+      // Reset operators and replay saved assignments
+      for (const op of operators) {
+        op.cursor = DAY_START;
+        op.totalWorked = 0;
+        op.hadLunch = false;
+        op.lunchStart = sharedLunchStart;
+        op.lunchEnd = sharedLunchStart + LUNCH_DURATION_MIN;
+      }
+      const sorted = [...savedAssignments].sort((a, b) => a.operatorStart - b.operatorStart);
+      for (const a of sorted) {
+        if (a.operatorName && a.task.operatorDuration > 0) {
+          const op = operators.find((o) => o.name === a.operatorName);
+          if (op) commitOperator(op, a.operatorStart, a.task.operatorDuration);
+        }
+      }
+
+      // Try emergency for remaining only
+      if (remaining.length > 0) {
+        const opsFree = operators.some((op) => op.totalWorked < OPERATOR_PRODUCTIVE_MINUTES - 10);
+        if (opsFree) {
+          remaining = tryScheduleAll(true, remaining);
+        }
       }
     }
   }
