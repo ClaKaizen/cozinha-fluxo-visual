@@ -806,8 +806,14 @@ function jointSchedule(
   const equipmentGroupOperators = new Map<string, string[]>();
 
   // ── Operator continuity: once an operator starts an artigo, they finish all its cycles ──
+  // ONLY for non-multiOperador equipment (e.g. Fritadeira). For multiOperador equipment
+  // (Basculante, Marmita, Forno) load balancing distributes across operators instead.
   // operatorName → { artigo, equipmentId, remaining }
   const operatorCommitments = new Map<string, { artigo: string; equipmentId: string; remaining: number }>();
+
+  // Track the operator dedicated to non-multiOperador equipment (e.g. Fritadeira).
+  // This operator is excluded from other tasks' load balancing.
+  const dedicatedSingleOpEquipOperators = new Set<string>();
 
   function getPreferredOperator(equipmentId: string): { name: string; strict: boolean } | undefined {
     const eq = equipmentMap.get(equipmentId);
@@ -832,6 +838,10 @@ function jointSchedule(
       if (isMulti || ops.length < 1) {
         ops.push(operatorName);
       }
+      // Mark as dedicated single-op if non-multiOperador
+      if (!isMulti) {
+        dedicatedSingleOpEquipOperators.add(operatorName);
+      }
     }
   }
 
@@ -850,15 +860,33 @@ function jointSchedule(
     return undefined;
   }
 
-  /** Register or update commitment when an operator is assigned a task */
+  /** Check if an operator is dedicated to a non-multiOperador equipment (e.g. Fritadeira)
+   *  and should be excluded from other tasks */
+  function isOperatorDedicatedToSingleOp(opName: string, taskEquipmentId: string): boolean {
+    if (!dedicatedSingleOpEquipOperators.has(opName)) return false;
+    // Allow if the task is on the same non-multiOperador equipment
+    const assigned = equipmentGroupOperators.get(taskEquipmentId);
+    if (assigned && assigned.includes(opName)) return true; // same equipment — OK
+    // Check if this equipment is also non-multiOperador and this op is assigned to it
+    // Otherwise, this op is dedicated elsewhere — exclude
+    return true; // dedicated to different equipment — exclude
+  }
+
+  /** Register or update commitment when an operator is assigned a task.
+   *  Only creates commitments for non-multiOperador equipment. */
   function registerCommitment(opName: string, task: PlanningTask, pendingTasks: PlanningTask[]) {
-    const remaining = pendingTasks.filter(t => t.artigo === task.artigo).length;
-    if (remaining > 0) {
-      operatorCommitments.set(opName, { artigo: task.artigo, equipmentId: task.equipmentId, remaining });
-    } else {
-      // Last cycle — clear commitment
-      operatorCommitments.delete(opName);
+    const eq = equipmentMap.get(task.equipmentId);
+    const isMulti = eq?.multiOperador ?? true;
+    // Only commit for non-multiOperador equipment (task continuity on Fritadeira etc.)
+    if (!isMulti) {
+      const remaining = pendingTasks.filter(t => t.artigo === task.artigo).length;
+      if (remaining > 0) {
+        operatorCommitments.set(opName, { artigo: task.artigo, equipmentId: task.equipmentId, remaining });
+      } else {
+        operatorCommitments.delete(opName);
+      }
     }
+    // For multiOperador equipment, no commitment — load balancing distributes freely
   }
 
   function tryScheduleAll(allowEmergency: boolean, tasksToSchedule: PlanningTask[]): PlanningTask[] {
@@ -936,15 +964,23 @@ function jointSchedule(
           }
         }
 
-        // Skip this task if its only viable operators are all committed elsewhere
-        // (but allow if no commitment exists for this artigo — a free operator can take it)
-        if (!committedOp) {
-          // Check if ALL free operators are committed to other artigos
-          const freeOps = operators.filter(o => !isOperatorCommittedElsewhere(o.name, task));
-          if (freeOps.length === 0 && operators.length > 0) continue; // all committed elsewhere, defer
+        // Build excluded operators set for this task
+        const excludedOps = new Set<string>();
+        for (const opName of dedicatedSingleOpEquipOperators) {
+          const assignedToThisEquip = (equipmentGroupOperators.get(primaryEqId) ?? []).includes(opName);
+          if (!assignedToThisEquip) excludedOps.add(opName);
+        }
+        for (const op of operators) {
+          if (isOperatorCommittedElsewhere(op.name, task)) excludedOps.add(op.name);
         }
 
-        const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOpName, lunchSafeCategories, strictPref);
+        // Skip if ALL operators are excluded
+        if (!committedOp) {
+          const availOps = operators.filter(o => !excludedOps.has(o.name));
+          if (availOps.length === 0 && operators.length > 0) continue;
+        }
+
+        const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOpName, lunchSafeCategories, strictPref, excludedOps);
         if (result) {
           // Reject if the assigned operator is committed to a different artigo
           if (result.operatorName && isOperatorCommittedElsewhere(result.operatorName, task)) continue;
@@ -1093,6 +1129,7 @@ function jointSchedule(
     scheduledCategoryEndTimes.clear();
     equipmentGroupOperators.clear();
     operatorCommitments.clear();
+    dedicatedSingleOpEquipOperators.clear();
 
     for (const op of operators) {
       op.cursor = OPERATOR_START;
@@ -1158,12 +1195,20 @@ function jointSchedule(
             const groupPref = getPreferredOperator(primaryEqId);
             if (groupPref) { preferredOpName = groupPref.name; strictPref = groupPref.strict; }
           }
+          const excludedOps = new Set<string>();
+          for (const opName of dedicatedSingleOpEquipOperators) {
+            const assignedToThisEquip = (equipmentGroupOperators.get(primaryEqId) ?? []).includes(opName);
+            if (!assignedToThisEquip) excludedOps.add(opName);
+          }
+          for (const op of operators) {
+            if (isOperatorCommittedElsewhere(op.name, task)) excludedOps.add(op.name);
+          }
           if (!committedOp) {
-            const freeOps = operators.filter(o => !isOperatorCommittedElsewhere(o.name, task));
-            if (freeOps.length === 0 && operators.length > 0) continue;
+            const availOps = operators.filter(o => !excludedOps.has(o.name));
+            if (availOps.length === 0 && operators.length > 0) continue;
           }
 
-          const result = tryJointSlot(task, tracker, operators, equipmentMap, true, equipment, depMinStart, preferredOpName, lunchSafeCategories, strictPref);
+          const result = tryJointSlot(task, tracker, operators, equipmentMap, true, equipment, depMinStart, preferredOpName, lunchSafeCategories, strictPref, excludedOps);
           if (result) {
             if (result.operatorName && isOperatorCommittedElsewhere(result.operatorName, task)) continue;
             const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
@@ -1307,6 +1352,7 @@ function tryJointSlot(
   preferredOperator?: string,
   lunchSafeCategoryIds: string[] = [],
   strictPreferred: boolean = false,
+  excludedOperators: Set<string> = new Set(),
 ): JointAssignment | null {
   const isLunchSafe = lunchSafeCategoryIds.includes(task.categoryId);
   const phases = buildBookingPhases(task);
@@ -1385,6 +1431,9 @@ function tryJointSlot(
     // If preferred didn't work (or no preferred), try all operators — but NOT if strict
     if (!bestOp && !strictPreferred) {
       for (const op of operators) {
+        // Skip excluded operators (e.g. committed elsewhere or dedicated to Fritadeira)
+        if (excludedOperators.has(op.name)) continue;
+
         const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration);
         if (opStart < 0) continue;
 
