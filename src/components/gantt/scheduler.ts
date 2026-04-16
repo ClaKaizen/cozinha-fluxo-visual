@@ -857,83 +857,111 @@ function jointSchedule(
     }
 
     const remaining: PlanningTask[] = [];
+    const pending = [...tasksToSchedule];
 
-    for (const task of tasksToSchedule) {
-      const depMinStart = getMinStartForTask(task);
+    // Greedy earliest-start: repeatedly pick the task that can start earliest
+    let maxIterations = pending.length * pending.length + pending.length;
+    while (pending.length > 0 && maxIterations-- > 0) {
+      let bestIdx = -1;
+      let bestResult: JointAssignment | null = null;
+      let bestStart = Infinity;
 
-      const primaryEqId = task.equipmentId;
-      // Get preferred operator for Op./Grupo enforcement
-      const preferredOp = getPreferredOperator(primaryEqId);
+      for (let ti = 0; ti < pending.length; ti++) {
+        const task = pending[ti];
+        // Skip if dependencies not yet met
+        if (!depsScheduled(task)) continue;
 
-      const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
-      if (result) {
-        // Commit machine slots and register dedicated machines / preferred pairs
-        for (const ma of result.machineAssignments) {
-          const slots = tracker.slots.get(ma.booking.equipmentId);
-          if (slots) slots[ma.machineIdx] = ma.end;
-          // Register dedicated machine assignment
-          if (ma.booking.isDedicated) {
-            const dedKey = `${task.categoryId}:${ma.booking.equipmentId}:ded`;
-            if (!tracker.dedicatedSlots.has(dedKey)) {
-              tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
+        const depMinStart = getMinStartForTask(task);
+        const primaryEqId = task.equipmentId;
+        const preferredOp = getPreferredOperator(primaryEqId);
+
+        const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
+        if (result) {
+          const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
+          if (taskStart < bestStart) {
+            bestStart = taskStart;
+            bestResult = result;
+            bestIdx = ti;
+          }
+        }
+      }
+
+      if (bestIdx < 0) {
+        // No task could be scheduled — check if any have unmet deps that might resolve
+        const hasUnmetDeps = pending.some(t => !depsScheduled(t));
+        if (hasUnmetDeps) {
+          // Move tasks with unmet deps to remaining
+          for (let i = pending.length - 1; i >= 0; i--) {
+            if (!depsScheduled(pending[i])) {
+              remaining.push(...pending.splice(i, 1));
             }
           }
+          continue;
         }
+        // All truly unschedulable
+        remaining.push(...pending);
+        break;
+      }
 
-        const cookingAssignment = result.machineAssignments.find((ma) => ma.pairRole === "cooking");
-        const coolingAssignment = result.machineAssignments.find((ma) => ma.pairRole === "cooling");
-        if (cookingAssignment && coolingAssignment) {
-          tracker.pairPreferences.set(
-            getPairPreferenceKey(task.categoryId, cookingAssignment.booking.equipmentId, coolingAssignment.booking.equipmentId),
-            {
-              primaryMachineIdx: cookingAssignment.machineIdx,
-              pairedMachineIdx: coolingAssignment.machineIdx,
-            },
-          );
-        }
+      const task = pending[bestIdx];
+      const result = bestResult!;
+      pending.splice(bestIdx, 1);
 
-        // Commit operator: each dose gets its own small T.Homem block
-        if (result.operatorName && task.operatorDuration > 0) {
-          const op = operators.find((o) => o.name === result.operatorName)!;
-          if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
-          // Register for Op./Grupo enforcement
-          registerGroupOperator(primaryEqId, result.operatorName);
-        }
-
-        // Track emergency
-        for (const ma of result.machineAssignments) {
-          const eqItem = equipmentMap.get(ma.booking.equipmentId);
-          if (eqItem && ma.machineIdx >= eqItem.quantidade) {
-            emergencyEquipmentNames.add(eqItem.nome);
+      // Commit machine slots and register dedicated machines / preferred pairs
+      for (const ma of result.machineAssignments) {
+        const slots = tracker.slots.get(ma.booking.equipmentId);
+        if (slots) slots[ma.machineIdx] = ma.end;
+        if (ma.booking.isDedicated) {
+          const dedKey = `${task.categoryId}:${ma.booking.equipmentId}:ded`;
+          if (!tracker.dedicatedSlots.has(dedKey)) {
+            tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
           }
         }
-
-        // Update category end times
-        const maxMachineEnd = Math.max(...result.machineAssignments.map(ma => ma.end));
-        const prevEnd = scheduledCategoryEndTimes.get(task.categoryId) ?? 0;
-        scheduledCategoryEndTimes.set(task.categoryId, Math.max(prevEnd, maxMachineEnd));
-
-        assignments.push(result);
-      } else {
-        remaining.push(task);
       }
+
+      const cookingAssignment = result.machineAssignments.find((ma) => ma.pairRole === "cooking");
+      const coolingAssignment = result.machineAssignments.find((ma) => ma.pairRole === "cooling");
+      if (cookingAssignment && coolingAssignment) {
+        tracker.pairPreferences.set(
+          getPairPreferenceKey(task.categoryId, cookingAssignment.booking.equipmentId, coolingAssignment.booking.equipmentId),
+          {
+            primaryMachineIdx: cookingAssignment.machineIdx,
+            pairedMachineIdx: coolingAssignment.machineIdx,
+          },
+        );
+      }
+
+      // Commit operator
+      if (result.operatorName && task.operatorDuration > 0) {
+        const op = operators.find((o) => o.name === result.operatorName)!;
+        if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
+        registerGroupOperator(task.equipmentId, result.operatorName);
+      }
+
+      // Track emergency
+      for (const ma of result.machineAssignments) {
+        const eqItem = equipmentMap.get(ma.booking.equipmentId);
+        if (eqItem && ma.machineIdx >= eqItem.quantidade) {
+          emergencyEquipmentNames.add(eqItem.nome);
+        }
+      }
+
+      // Update category end times
+      const maxMachineEnd = Math.max(...result.machineAssignments.map(ma => ma.end));
+      const prevEnd = scheduledCategoryEndTimes.get(task.categoryId) ?? 0;
+      scheduledCategoryEndTimes.set(task.categoryId, Math.max(prevEnd, maxMachineEnd));
+
+      assignments.push(result);
     }
 
+    // Any leftover pending tasks
+    remaining.push(...pending);
     return remaining;
   }
 
-  // Pass 1: Schedule tasks with no unmet dependencies (normal machines)
-  let remaining = tryScheduleAll(false, pass1Tasks);
-
-  // Pass 2: Schedule deferred tasks (dependencies now met)
-  if (deferredTasks.length > 0) {
-    remaining = [...remaining, ...tryScheduleAll(false, deferredTasks)];
-  }
-
-  // Schedule circular tasks normally
-  if (circularTasks.length > 0) {
-    remaining = [...remaining, ...tryScheduleAll(false, circularTasks)];
-  }
+  // Schedule all tasks together — greedy picks earliest-startable across all categories
+  const allTasks = [...pass1Tasks, ...deferredTasks, ...circularTasks];
+  let remaining = tryScheduleAll(false, allTasks);
 
   // ── Emergency auto-activation (per equipment type) ──
   // Identify which equipment types actually have overflow
