@@ -79,4 +79,4 @@ export interface SequencingRule {
 export const BREAK_COEFFICIENT = 0.0625;
 export const INEFFICIENCY_FACTOR = 1.20;
 export const EFFECTIVE_HOURS = 8; // Direct 8h per operator
-export const AVAILABLE_MINUTES = 480; // 07:00-16:00 (540 min) minus 60 min lunch
+export const AVAILABLE_MINUTES = 480; // 07:10-16:00 (530 min) minus 60 min lunch = 470 (machine window unchanged)
