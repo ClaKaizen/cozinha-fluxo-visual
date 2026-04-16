@@ -939,7 +939,9 @@ function jointSchedule(
       let bestIdx = -1;
       let bestResult: JointAssignment | null = null;
       let bestStart = Infinity;
-      let bestOnIdleEquip = false; // prefer tasks on idle equipment
+      let bestOnIdleEquip = false;
+      let bestOpLoad = Infinity;
+      let bestEqContention = Infinity;
 
       for (let ti = 0; ti < pending.length; ti++) {
         const task = pending[ti];
@@ -988,15 +990,34 @@ function jointSchedule(
           const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
           const onIdleEquip = !busyEquipmentIds.has(primaryEqId);
 
-          // Priority: idle equipment tasks first (if they start reasonably early),
-          // then earliest start among the same priority class
+          // Operator load for the assigned operator
+          const assignedOp = operators.find(o => o.name === result.operatorName);
+          const opLoad = assignedOp?.totalWorked ?? 0;
+
+          // Equipment contention ratio (lower = less contended = prefer filling first)
+          const eqCont = equipContention.get(primaryEqId) ?? 0;
+          const eq = equipmentMap.get(primaryEqId);
+          const eqCapacity = eq ? eq.quantidade * AVAILABLE_MACHINE_MINUTES : 1;
+          const contentionRatio = eqCont / eqCapacity;
+
           let isBetter = false;
           if (bestIdx < 0) {
             isBetter = true;
           } else if (onIdleEquip && !bestOnIdleEquip) {
-            isBetter = taskStart <= bestStart + 60;
+            // Idle equipment strongly preferred over busy equipment
+            isBetter = taskStart <= bestStart + 30;
           } else if (!onIdleEquip && bestOnIdleEquip) {
             isBetter = false;
+          } else if (Math.abs(taskStart - bestStart) <= 10) {
+            // Similar start times: prefer lower contention equipment (diversify),
+            // then least-loaded operator
+            if (contentionRatio < bestEqContention - 0.1) {
+              isBetter = true;
+            } else if (contentionRatio > bestEqContention + 0.1) {
+              isBetter = false;
+            } else {
+              isBetter = opLoad < bestOpLoad;
+            }
           } else {
             isBetter = taskStart < bestStart;
           }
@@ -1006,6 +1027,8 @@ function jointSchedule(
             bestResult = result;
             bestIdx = ti;
             bestOnIdleEquip = onIdleEquip;
+            bestOpLoad = opLoad;
+            bestEqContention = contentionRatio;
           }
         }
       }
@@ -1177,6 +1200,8 @@ function jointSchedule(
         let bestResult: JointAssignment | null = null;
         let bestStart = Infinity;
         let bestOnIdle = false;
+        let bestOpLoad = Infinity;
+        let bestEqCont = Infinity;
 
         for (let ti = 0; ti < pending.length; ti++) {
           const task = pending[ti];
@@ -1213,16 +1238,32 @@ function jointSchedule(
             if (result.operatorName && isOperatorCommittedElsewhere(result.operatorName, task)) continue;
             const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
             const onIdle = !busyEqIds.has(primaryEqId);
+
+            const assignedOp = operators.find(o => o.name === result.operatorName);
+            const opLoad = assignedOp?.totalWorked ?? 0;
+            const eqCont = equipContention.get(primaryEqId) ?? 0;
+            const eq = equipmentMap.get(primaryEqId);
+            const eqCap = eq ? eq.quantidade * AVAILABLE_MACHINE_MINUTES : 1;
+            const contRatio = eqCont / eqCap;
+
             let isBetter = false;
             if (bestIdx < 0) isBetter = true;
-            else if (onIdle && !bestOnIdle) isBetter = taskStart <= bestStart + 60;
+            else if (onIdle && !bestOnIdle) isBetter = taskStart <= bestStart + 30;
             else if (!onIdle && bestOnIdle) isBetter = false;
-            else isBetter = taskStart < bestStart;
+            else if (Math.abs(taskStart - bestStart) <= 10) {
+              if (contRatio < bestEqCont - 0.1) isBetter = true;
+              else if (contRatio > bestEqCont + 0.1) isBetter = false;
+              else isBetter = opLoad < bestOpLoad;
+            } else {
+              isBetter = taskStart < bestStart;
+            }
             if (isBetter) {
               bestStart = taskStart;
               bestResult = result;
               bestIdx = ti;
               bestOnIdle = onIdle;
+              bestOpLoad = opLoad;
+              bestEqCont = contRatio;
             }
           }
         }
