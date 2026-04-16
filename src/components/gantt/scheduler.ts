@@ -861,10 +861,13 @@ function jointSchedule(
 
     // Greedy earliest-start: repeatedly pick the task that can start earliest
     let maxIterations = pending.length * pending.length + pending.length;
+    const isDebugDay = typeof window !== 'undefined'; // always log for now
     while (pending.length > 0 && maxIterations-- > 0) {
       let bestIdx = -1;
       let bestResult: JointAssignment | null = null;
       let bestStart = Infinity;
+
+      const candidateResults: { idx: number; taskLabel: string; eqName: string; start: number | null }[] = [];
 
       for (let ti = 0; ti < pending.length; ti++) {
         const task = pending[ti];
@@ -878,12 +881,24 @@ function jointSchedule(
         const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
         if (result) {
           const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
+          candidateResults.push({ idx: ti, taskLabel: task.doseLabel, eqName: task.equipmentName, start: taskStart });
           if (taskStart < bestStart) {
             bestStart = taskStart;
             bestResult = result;
             bestIdx = ti;
           }
+        } else {
+          candidateResults.push({ idx: ti, taskLabel: task.doseLabel, eqName: task.equipmentName, start: null });
         }
+      }
+
+      if (isDebugDay && candidateResults.length > 0) {
+        console.log('[Greedy Iter]', {
+          pendingCount: pending.length,
+          candidates: candidateResults.map(c => `${c.taskLabel}(${c.eqName})@${c.start !== null ? formatClock(c.start) : 'FAIL'}`),
+          picked: bestIdx >= 0 ? `${pending[bestIdx].doseLabel} @ ${formatClock(bestStart)}` : 'NONE',
+          operatorCursors: operators.map(o => `${o.name}:${formatClock(o.cursor)}`),
+        });
       }
 
       if (bestIdx < 0) {
