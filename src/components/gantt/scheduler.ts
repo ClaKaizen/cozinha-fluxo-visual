@@ -919,10 +919,36 @@ function jointSchedule(
 
         const depMinStart = getMinStartForTask(task);
         const primaryEqId = task.equipmentId;
-        const preferredOp = getPreferredOperator(primaryEqId);
 
-        const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
+        // Determine preferred operator: committed operator > equipment group preference
+        let preferredOpName: string | undefined;
+        let strictPref = false;
+
+        const committedOp = getCommittedOperator(task);
+        if (committedOp) {
+          preferredOpName = committedOp;
+          strictPref = true; // committed operator MUST do this task
+        } else {
+          const groupPref = getPreferredOperator(primaryEqId);
+          if (groupPref) {
+            preferredOpName = groupPref.name;
+            strictPref = groupPref.strict;
+          }
+        }
+
+        // Skip this task if its only viable operators are all committed elsewhere
+        // (but allow if no commitment exists for this artigo — a free operator can take it)
+        if (!committedOp) {
+          // Check if ALL free operators are committed to other artigos
+          const freeOps = operators.filter(o => !isOperatorCommittedElsewhere(o.name, task));
+          if (freeOps.length === 0 && operators.length > 0) continue; // all committed elsewhere, defer
+        }
+
+        const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOpName, lunchSafeCategories, strictPref);
         if (result) {
+          // Reject if the assigned operator is committed to a different artigo
+          if (result.operatorName && isOperatorCommittedElsewhere(result.operatorName, task)) continue;
+
           const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
           const onIdleEquip = !busyEquipmentIds.has(primaryEqId);
 
@@ -932,14 +958,10 @@ function jointSchedule(
           if (bestIdx < 0) {
             isBetter = true;
           } else if (onIdleEquip && !bestOnIdleEquip) {
-            // Prefer idle equipment — but only if this task starts within a reasonable window
-            // (don't pick a task starting at 14:00 over one at 09:33 just because equipment is idle)
             isBetter = taskStart <= bestStart + 60;
           } else if (!onIdleEquip && bestOnIdleEquip) {
-            // Don't replace an idle-equip pick with a busy-equip one
             isBetter = false;
           } else {
-            // Same priority class: pick earliest start
             isBetter = taskStart < bestStart;
           }
 
