@@ -1080,13 +1080,7 @@ function jointSchedule(
       return rem;
     }
 
-    let emergRemaining = tryScheduleAllPerType(pass1Tasks);
-    if (deferredTasks.length > 0) {
-      emergRemaining = [...emergRemaining, ...tryScheduleAllPerType(deferredTasks)];
-    }
-    if (circularTasks.length > 0) {
-      emergRemaining = [...emergRemaining, ...tryScheduleAllPerType(circularTasks)];
-    }
+    const emergRemaining = tryScheduleAllPerType(allTasks);
 
     // Compare: is per-type emergency better than normal?
     const normalProblems = savedAssignments.filter((a) =>
