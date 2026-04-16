@@ -859,19 +859,32 @@ function jointSchedule(
     const remaining: PlanningTask[] = [];
     const pending = [...tasksToSchedule];
 
-    // Greedy earliest-start: repeatedly pick the task that can start earliest
+    // Greedy earliest-start with gap-filling: prefer tasks on idle equipment
+    // over tasks on equipment with active long machine runs
     let maxIterations = pending.length * pending.length + pending.length;
-    const isDebugDay = typeof window !== 'undefined'; // always log for now
     while (pending.length > 0 && maxIterations-- > 0) {
+      // Determine the earliest operator cursor (= when operators become free)
+      const earliestOpCursor = Math.min(...operators.map(o => o.cursor));
+
+      // Find equipment types that are "busy" — all machine slots extend well past operator availability
+      // These are equipment types where scheduling another batch would just wait for the machine
+      const busyEquipmentIds = new Set<string>();
+      tracker.slots.forEach((slots, eqId) => {
+        const minSlot = Math.min(...slots);
+        // If the earliest machine of this type is free > 30min after operators are available,
+        // it's "busy" — deprioritize additional batches on it
+        if (minSlot > earliestOpCursor + 30) {
+          busyEquipmentIds.add(eqId);
+        }
+      });
+
       let bestIdx = -1;
       let bestResult: JointAssignment | null = null;
       let bestStart = Infinity;
-
-      const candidateResults: { idx: number; taskLabel: string; eqName: string; start: number | null }[] = [];
+      let bestOnIdleEquip = false; // prefer tasks on idle equipment
 
       for (let ti = 0; ti < pending.length; ti++) {
         const task = pending[ti];
-        // Skip if dependencies not yet met
         if (!depsScheduled(task)) continue;
 
         const depMinStart = getMinStartForTask(task);
@@ -881,24 +894,32 @@ function jointSchedule(
         const result = tryJointSlot(task, tracker, operators, equipmentMap, allowEmergency, equipment, depMinStart, preferredOp?.name, lunchSafeCategories, preferredOp?.strict);
         if (result) {
           const taskStart = Math.min(result.operatorStart, ...result.machineAssignments.map(ma => ma.start));
-          candidateResults.push({ idx: ti, taskLabel: task.doseLabel, eqName: task.equipmentName, start: taskStart });
-          if (taskStart < bestStart) {
+          const onIdleEquip = !busyEquipmentIds.has(primaryEqId);
+
+          // Priority: idle equipment tasks first (if they start reasonably early),
+          // then earliest start among the same priority class
+          let isBetter = false;
+          if (bestIdx < 0) {
+            isBetter = true;
+          } else if (onIdleEquip && !bestOnIdleEquip) {
+            // Prefer idle equipment — but only if this task starts within a reasonable window
+            // (don't pick a task starting at 14:00 over one at 09:33 just because equipment is idle)
+            isBetter = taskStart <= bestStart + 60;
+          } else if (!onIdleEquip && bestOnIdleEquip) {
+            // Don't replace an idle-equip pick with a busy-equip one
+            isBetter = false;
+          } else {
+            // Same priority class: pick earliest start
+            isBetter = taskStart < bestStart;
+          }
+
+          if (isBetter) {
             bestStart = taskStart;
             bestResult = result;
             bestIdx = ti;
+            bestOnIdleEquip = onIdleEquip;
           }
-        } else {
-          candidateResults.push({ idx: ti, taskLabel: task.doseLabel, eqName: task.equipmentName, start: null });
         }
-      }
-
-      if (isDebugDay && candidateResults.length > 0) {
-        console.log('[Greedy Iter]', {
-          pendingCount: pending.length,
-          candidates: candidateResults.map(c => `${c.taskLabel}(${c.eqName})@${c.start !== null ? formatClock(c.start) : 'FAIL'}`),
-          picked: bestIdx >= 0 ? `${pending[bestIdx].doseLabel} @ ${formatClock(bestStart)}` : 'NONE',
-          operatorCursors: operators.map(o => `${o.name}:${formatClock(o.cursor)}`),
-        });
       }
 
       if (bestIdx < 0) {
