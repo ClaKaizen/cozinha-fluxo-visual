@@ -1743,7 +1743,8 @@ export function buildDailyGanttSchedule({
         const tMaqPrimaryFull = isFirst ? (cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina) : cat.tempoCicloMaquina;
         // Scale durations for partial last cycle
         const tHomem = fraction < 1 ? Math.max(1, Math.round(tHomemFull * fraction)) : tHomemFull;
-        const tMaqPrimary = fraction < 1 ? Math.max(1, Math.round(tMaqPrimaryFull * fraction)) : tMaqPrimaryFull;
+        // Machine always runs a full cycle even for partial doses
+        const tMaqPrimary = tMaqPrimaryFull;
         const primaryColorIndex = (equipmentIndex.get(machine.id) ?? 0) % 6;
 
         const bookings: MachineBooking[] = [];
@@ -1764,7 +1765,8 @@ export function buildDailyGanttSchedule({
             const extraDurationFull = isFirst
               ? (extra.tempoCicloMaquina1 ?? extra.tempoCicloMaquina)
               : extra.tempoCicloMaquina;
-            const extraDuration = fraction < 1 ? Math.max(1, Math.round(extraDurationFull * fraction)) : extraDurationFull;
+            // Machine always runs full cycle even for partial doses
+            const extraDuration = extraDurationFull;
             if (extraDuration <= 0) continue;
             const isFirstPhase = extra.isFirst ?? false;
             bookings.push({
