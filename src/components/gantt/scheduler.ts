@@ -920,7 +920,26 @@ function jointSchedule(
     // Greedy earliest-start with gap-filling: prefer tasks on idle equipment
     // over tasks on equipment with active long machine runs
     let maxIterations = pending.length * pending.length + pending.length;
-    while (pending.length > 0 && maxIterations-- > 0) {
+    // Track deferred tasks separately — they may become schedulable after deps resolve
+    const deferred: PlanningTask[] = [];
+
+    while ((pending.length > 0 || deferred.length > 0) && maxIterations-- > 0) {
+      // Re-check deferred tasks: move those with now-satisfied deps back to pending
+      if (deferred.length > 0) {
+        for (let i = deferred.length - 1; i >= 0; i--) {
+          if (depsScheduled(deferred[i])) {
+            pending.push(deferred.splice(i, 1)[0]);
+          }
+        }
+      }
+
+      if (pending.length === 0) {
+        // All remaining tasks are deferred with unmet deps that will never resolve
+        remaining.push(...deferred);
+        deferred.length = 0;
+        break;
+      }
+
       // Determine the earliest operator cursor (= when operators become free)
       const earliestOpCursor = Math.min(...operators.map(o => o.cursor));
 
@@ -1030,23 +1049,30 @@ function jointSchedule(
             bestOpLoad = opLoad;
             bestEqContention = contentionRatio;
           }
+        } else {
+          // Log why task couldn't be scheduled
+          console.warn(`[Scheduler] tryJointSlot returned null for "${task.doseLabel}" (equip: ${task.equipmentName}, tHomem: ${task.operatorDuration}min, tMaq: ${task.machineDuration}min)`);
         }
       }
 
       if (bestIdx < 0) {
-        // No task could be scheduled — check if any have unmet deps that might resolve
+        // No task could be scheduled in this iteration
         const hasUnmetDeps = pending.some(t => !depsScheduled(t));
         if (hasUnmetDeps) {
-          // Move tasks with unmet deps to remaining
+          // Move tasks with unmet deps to deferred (NOT remaining) — they may resolve later
           for (let i = pending.length - 1; i >= 0; i--) {
             if (!depsScheduled(pending[i])) {
-              remaining.push(...pending.splice(i, 1));
+              deferred.push(...pending.splice(i, 1));
             }
           }
           continue;
         }
-        // All truly unschedulable
+        // All truly unschedulable — log them
+        for (const t of pending) {
+          console.warn(`[Scheduler] UNSCHEDULABLE: "${t.doseLabel}" (equip: ${t.equipmentName}, cat: ${t.categoryName})`);
+        }
         remaining.push(...pending);
+        pending.length = 0;
         break;
       }
 
@@ -1102,8 +1128,9 @@ function jointSchedule(
       assignments.push(result);
     }
 
-    // Any leftover pending tasks
+    // Any leftover pending + deferred tasks
     remaining.push(...pending);
+    remaining.push(...deferred);
     return remaining;
   }
 
