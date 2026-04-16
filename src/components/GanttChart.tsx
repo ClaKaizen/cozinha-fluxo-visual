@@ -314,10 +314,10 @@ function OperatorGanttSection({
   const labelWidth = 148;
   const rowHeight = 42;
   const pixelsPerMinute = 1.55;
-  const totalSpan = axisEnd - DAY_START;
+  const totalSpan = axisEnd - OPERATOR_START;
   const chartWidth = Math.max(760, totalSpan * pixelsPerMinute);
-  const toPercent = (minutes: number) => ((minutes - DAY_START) / totalSpan) * 100;
-  const markers = Array.from({ length: Math.floor((axisEnd - DAY_START) / 30) + 1 }, (_, i) => DAY_START + i * 30);
+  const toPercent = (minutes: number) => ((minutes - OPERATOR_START) / totalSpan) * 100;
+  const markers = Array.from({ length: Math.floor((axisEnd - OPERATOR_START) / 30) + 1 }, (_, i) => OPERATOR_START + i * 30);
   const totalHeight = rows.length * rowHeight;
   const hardStopLeft = toPercent(OPERATOR_HARD_STOP);
   const secondaryStopLeft = toPercent(MACHINE_TARGET_STOP);

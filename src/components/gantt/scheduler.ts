@@ -1733,7 +1733,7 @@ export function buildDailyGanttSchedule({
   // Build operator states for Gantt
   const operatorStates: OperatorState[] = allOpNames.map((name) => ({
     name,
-    cursor: DAY_START,
+    cursor: OPERATOR_START,
     totalWorked: 0,
     hadLunch: false,
     lunchStart: result.assignments.length > 0 ? Math.min(...result.assignments.map(() => LUNCH_WINDOW_START)) : LUNCH_WINDOW_START,
