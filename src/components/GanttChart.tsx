@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowLeftRight, Pencil, RotateCcw, Save, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -279,18 +279,7 @@ function MachineGanttSection(props: {
   );
 }
 
-// ── Operator Gantt Section (with edit mode + custom DnD) ─
-
-const isDev = typeof import.meta !== "undefined" && (import.meta as any).env?.DEV;
-
-interface DragState {
-  taskId: string;
-  fromOp: string;
-  blockWidthPx: number;
-  blockHeightPx: number;
-  label: string;
-  timeLabel: string;
-}
+// ── Operator Gantt Section (with edit mode) ─────────────
 
 function OperatorGanttSection({
   rows,
@@ -303,7 +292,6 @@ function OperatorGanttSection({
   allOperatorLabels,
   onSwapOperators,
   onMoveTask,
-  onReorderTasks,
   getAvailableTargets,
 }: {
   rows: GanttRow<OperatorTask>[];
@@ -316,17 +304,13 @@ function OperatorGanttSection({
   allOperatorLabels: string[];
   onSwapOperators: (opA: string, opB: string) => void;
   onMoveTask: (taskId: string, fromOp: string, toOp: string) => void;
-  onReorderTasks: (taskId: string, fromOp: string, toOp: string, insertIndex: number) => void;
   getAvailableTargets: (taskId: string, fromOp: string) => string[];
 }) {
-  const [dragging, setDragging] = useState<DragState | null>(null);
-  const [hoverOp, setHoverOp] = useState<string | null>(null);
-  const [insertIdx, setInsertIdx] = useState<number>(-1);
-  const [flashId, setFlashId] = useState<string | null>(null);
-
-  const previewRef = useRef<HTMLDivElement | null>(null);
-  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const draggingRef = useRef<DragState | null>(null);
+  if (rows.length === 0) {
+    return (
+      <p className="py-4 text-center text-sm text-muted-foreground">Sem operadores presentes na Escala para este dia.</p>
+    );
+  }
 
   const labelWidth = 148;
   const rowHeight = 42;
@@ -334,199 +318,12 @@ function OperatorGanttSection({
   const totalSpan = axisEnd - OPERATOR_START;
   const chartWidth = Math.max(760, totalSpan * pixelsPerMinute);
   const toPercent = (minutes: number) => ((minutes - OPERATOR_START) / totalSpan) * 100;
-  const firstMarker = Math.ceil(OPERATOR_START / 30) * 30;
+  // Grid markers on 30-min intervals aligned to clock, starting from first >= OPERATOR_START
+  const firstMarker = Math.ceil(OPERATOR_START / 30) * 30; // 450 = 07:30
   const markers = [OPERATOR_START, ...Array.from({ length: Math.floor((axisEnd - firstMarker) / 30) + 1 }, (_, i) => firstMarker + i * 30)];
   const totalHeight = rows.length * rowHeight;
   const hardStopLeft = toPercent(OPERATOR_HARD_STOP);
   const secondaryStopLeft = toPercent(MACHINE_TARGET_STOP);
-
-  // Single source of truth: reset every piece of drag state
-  const resetDragState = () => {
-    draggingRef.current = null;
-    setDragging(null);
-    setHoverOp(null);
-    setInsertIdx(-1);
-    if (previewRef.current && previewRef.current.parentNode) {
-      previewRef.current.parentNode.removeChild(previewRef.current);
-    }
-    previewRef.current = null;
-  };
-
-  const computeInsertIndexAtX = (rowEl: HTMLElement, opLabel: string, clientX: number): number => {
-    const row = rows.find((r) => r.label === opLabel);
-    if (!row) return 0;
-    const rect = rowEl.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const sorted = [...row.tasks].sort((a, b) => a.start - b.start);
-    for (let i = 0; i < sorted.length; i++) {
-      const t = sorted[i];
-      const leftPx = ((t.start - OPERATOR_START) / totalSpan) * chartWidth;
-      const widthPx = ((t.end - t.start) / totalSpan) * chartWidth;
-      const midPx = leftPx + widthPx / 2;
-      if (x < midPx) return i;
-    }
-    return sorted.length;
-  };
-
-  // Document-level pointermove: update floating preview + detect row + insertion idx
-  useEffect(() => {
-    if (!dragging) return;
-
-    const handleMove = (ev: PointerEvent) => {
-      // Move preview
-      if (previewRef.current) {
-        previewRef.current.style.transform = `translate(${ev.clientX - dragging.blockWidthPx / 2}px, ${ev.clientY - dragging.blockHeightPx / 2}px) scale(1.05)`;
-      }
-      // Find which row the cursor is over
-      let foundOp: string | null = null;
-      let foundEl: HTMLElement | null = null;
-      for (const [label, el] of Object.entries(rowRefs.current)) {
-        if (!el) continue;
-        const rect = el.getBoundingClientRect();
-        if (ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
-          foundOp = label;
-          foundEl = el;
-          break;
-        }
-      }
-      if (foundOp && foundEl) {
-        const idx = computeInsertIndexAtX(foundEl, foundOp, ev.clientX);
-        setHoverOp((cur) => (cur === foundOp ? cur : foundOp));
-        setInsertIdx((cur) => (cur === idx ? cur : idx));
-      } else {
-        setHoverOp((cur) => (cur === null ? cur : null));
-        setInsertIdx((cur) => (cur === -1 ? cur : -1));
-      }
-    };
-
-    const handleUp = (ev: PointerEvent) => {
-      const cur = draggingRef.current;
-      if (!cur) {
-        resetDragState();
-        return;
-      }
-      // Detect drop row
-      let dropOp: string | null = null;
-      let dropEl: HTMLElement | null = null;
-      for (const [label, el] of Object.entries(rowRefs.current)) {
-        if (!el) continue;
-        const rect = el.getBoundingClientRect();
-        if (ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
-          dropOp = label;
-          dropEl = el;
-          break;
-        }
-      }
-      if (dropOp && dropEl) {
-        const idx = computeInsertIndexAtX(dropEl, dropOp, ev.clientX);
-        const taskId = cur.taskId;
-        if (isDev) console.log("[DnD] drop", { taskId, fromOp: cur.fromOp, toOp: dropOp, idx });
-        onReorderTasks(taskId, cur.fromOp, dropOp, idx);
-        resetDragState();
-        setFlashId(taskId);
-        window.setTimeout(() => setFlashId((c) => (c === taskId ? null : c)), 400);
-      } else {
-        if (isDev) console.log("[DnD] cancel — dropped outside any row");
-        resetDragState();
-      }
-    };
-
-    const handleKey = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") resetDragState();
-    };
-
-    document.addEventListener("pointermove", handleMove);
-    document.addEventListener("pointerup", handleUp);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("pointermove", handleMove);
-      document.removeEventListener("pointerup", handleUp);
-      document.removeEventListener("keydown", handleKey);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragging]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (previewRef.current && previewRef.current.parentNode) {
-        previewRef.current.parentNode.removeChild(previewRef.current);
-      }
-      previewRef.current = null;
-    };
-  }, []);
-
-  const startDrag = (
-    ev: React.PointerEvent,
-    task: OperatorTask,
-    fromOp: string,
-    blockEl: HTMLElement,
-  ) => {
-    if (!editMode) return;
-    if (ev.button !== 0) return;
-    ev.preventDefault();
-    const rect = blockEl.getBoundingClientRect();
-    const state: DragState = {
-      taskId: task.id,
-      fromOp,
-      blockWidthPx: rect.width,
-      blockHeightPx: rect.height,
-      label: task.artigo,
-      timeLabel: `${formatClock(task.start)}–${formatClock(task.end)}`,
-    };
-    draggingRef.current = state;
-
-    // Build floating preview
-    const preview = document.createElement("div");
-    preview.style.position = "fixed";
-    preview.style.left = "0";
-    preview.style.top = "0";
-    preview.style.width = `${rect.width}px`;
-    preview.style.height = `${rect.height}px`;
-    preview.style.pointerEvents = "none";
-    preview.style.zIndex = "9999";
-    preview.style.borderRadius = "6px";
-    preview.style.padding = "2px 6px";
-    preview.style.fontSize = "10px";
-    preview.style.fontWeight = "600";
-    preview.style.color = "#1a2233";
-    preview.style.background = "#FFD966";
-    preview.style.border = "1px solid #b8923f";
-    preview.style.boxShadow = "0 8px 24px rgba(0,0,0,0.18)";
-    preview.style.display = "flex";
-    preview.style.flexDirection = "column";
-    preview.style.justifyContent = "center";
-    preview.style.overflow = "hidden";
-    preview.style.transformOrigin = "center center";
-    preview.style.transform = `translate(${ev.clientX - rect.width / 2}px, ${ev.clientY - rect.height / 2}px) scale(1.05)`;
-    preview.innerHTML = `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${state.label}</span><span style="font-size:9px;font-weight:500;opacity:0.75">${state.timeLabel}</span>`;
-    document.body.appendChild(preview);
-    previewRef.current = preview;
-
-    if (isDev) console.log("[DnD] dragstart", { taskId: task.id, fromOp });
-    setDragging(state);
-  };
-
-  if (rows.length === 0) {
-    return (
-      <p className="py-4 text-center text-sm text-muted-foreground">Sem operadores presentes na Escala para este dia.</p>
-    );
-  }
-
-  // Compute X position of insertion line for a given row
-  const insertionLineLeft = (opLabel: string): number | null => {
-    if (hoverOp !== opLabel || insertIdx < 0) return null;
-    const row = rows.find((r) => r.label === opLabel);
-    if (!row) return null;
-    const sorted = [...row.tasks].sort((a, b) => a.start - b.start);
-    if (sorted.length === 0) return 0;
-    if (insertIdx >= sorted.length) {
-      const last = sorted[sorted.length - 1];
-      return ((last.end - OPERATOR_START) / totalSpan) * chartWidth;
-    }
-    const t = sorted[insertIdx];
-    return ((t.start - OPERATOR_START) / totalSpan) * chartWidth;
-  };
 
   return (
     <div className="overflow-x-auto">
@@ -548,11 +345,7 @@ function OperatorGanttSection({
             const rowLunch = rowLunchBreaks?.[row.label];
             const lunchLeft = rowLunch ? toPercent(rowLunch.start) : 0;
             const lunchWidth = rowLunch ? ((rowLunch.end - rowLunch.start) / totalSpan) * 100 : 0;
-            const isDropTarget = editMode && dragging !== null;
-            const isHovered = hoverOp === row.label;
-            const lineLeft = insertionLineLeft(row.label);
-            const sortedTasks = [...row.tasks].sort((a, b) => a.start - b.start);
-            const draggedWidthPct = dragging ? (dragging.blockWidthPx / chartWidth) * 100 : 0;
+            const isOverridden = overriddenOperators.has(row.label);
 
             return (
               <div key={row.label} className="relative flex items-center" style={{ height: rowHeight }}>
@@ -565,50 +358,26 @@ function OperatorGanttSection({
                     />
                   )}
                   <span className="truncate">{row.label}</span>
+                  {isOverridden && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-[10px] cursor-help">✏️</span>
+                      </TooltipTrigger>
+                      <TooltipContent className="text-xs">Atribuição editada manualmente — clique em Repor para reverter</TooltipContent>
+                    </Tooltip>
+                  )}
                 </div>
-                <div
-                  ref={(el) => { rowRefs.current[row.label] = el; }}
-                  className={`relative h-full flex-1 border-b transition-colors ${
-                    isDropTarget
-                      ? isHovered
-                        ? "border-2 border-dashed"
-                        : "border-2 border-dashed border-border/60"
-                      : "border-border/30 bg-muted/5"
-                  }`}
-                  style={{
-                    width: chartWidth,
-                    ...(isDropTarget && isHovered
-                      ? { borderColor: "#FFD966", backgroundColor: "rgba(255,217,102,0.15)" }
-                      : {}),
-                  }}
-                >
+                <div className="relative h-full flex-1 border-b border-border/30 bg-muted/5" style={{ width: chartWidth }}>
                   {rowLunch && (
                     <div className="absolute top-0 z-[1] rounded bg-muted/60" style={{ left: `${lunchLeft}%`, width: `${lunchWidth}%`, height: rowHeight }} />
                   )}
-                  {/* Insertion indicator: 2px line + circular handles top/bottom */}
-                  {lineLeft !== null && (
-                    <>
-                      <div
-                        className="absolute top-0 z-[20] pointer-events-none"
-                        style={{ left: lineLeft - 1, width: 2, height: rowHeight, backgroundColor: "#44546A" }}
-                      />
-                      <div
-                        className="absolute z-[21] pointer-events-none rounded-full"
-                        style={{ left: lineLeft - 3, top: 0, width: 6, height: 6, backgroundColor: "#44546A" }}
-                      />
-                      <div
-                        className="absolute z-[21] pointer-events-none rounded-full"
-                        style={{ left: lineLeft - 3, top: rowHeight - 6, width: 6, height: 6, backgroundColor: "#44546A" }}
-                      />
-                    </>
-                  )}
-                  {row.tasks.length === 0 && !isDropTarget && (
+                  {row.tasks.length === 0 && (
                     <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground italic">
                       Sem tarefas atribuídas
                     </div>
                   )}
-                  {sortedTasks.map((task, taskIdx) => {
-                    return task.segments.map((seg, si) => {
+                  {row.tasks.map((task) =>
+                    task.segments.map((seg, si) => {
                       const left = toPercent(seg.start);
                       const width = ((seg.end - seg.start) / totalSpan) * 100;
                       const widthPx = (width / 100) * chartWidth;
@@ -616,86 +385,53 @@ function OperatorGanttSection({
                       const showTime = widthPx > 60;
                       const isOverflow = seg.overflow;
                       const isConflict = conflictTaskIds.has(task.id);
-                      const isBeingDragged = dragging?.taskId === task.id;
-                      const isFlashing = flashId === task.id;
-                      const exceedsHardStop = task.end > OPERATOR_HARD_STOP;
                       const labelPrefix = isOverflow ? "⚠ " : task.showSimultaneousBadge ? "⊗ " : "";
-
-                      // Permutation preview: while dragging over THIS row,
-                      // shift tasks at index >= insertIdx to the right by
-                      // dragged block width to preview landing position.
-                      const shouldShift =
-                        dragging !== null &&
-                        isHovered &&
-                        si === 0 &&
-                        !isBeingDragged &&
-                        insertIdx >= 0 &&
-                        taskIdx >= insertIdx;
-                      const shiftPx = shouldShift ? dragging!.blockWidthPx + 6 : 0;
 
                       const blockEl = (
                         <div
                           key={`${task.id}-${si}`}
-                          onPointerDown={(e) => {
-                            if (editMode && si === 0) {
-                              startDrag(e, task, row.label, e.currentTarget);
-                            }
-                          }}
                           className={`absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-0.5 text-[10px] font-semibold text-foreground shadow-sm z-10 ${
                             isConflict
                               ? "border-2 border-destructive ring-1 ring-destructive/30"
-                              : exceedsHardStop
-                              ? "border-2 border-dashed border-red-500"
                               : isOverflow
                               ? "border-dashed border-red-500 bg-red-100/60 dark:bg-red-900/30"
                               : ""
-                          } ${editMode ? (isBeingDragged ? "cursor-grabbing" : "cursor-grab hover:ring-2 hover:ring-primary/40") : ""} ${
-                            isFlashing ? "ring-4 ring-[#FFD966]" : ""
-                          }`}
+                          } ${editMode ? "cursor-pointer hover:ring-2 hover:ring-primary/40" : ""}`}
                           style={{
                             left: `${left}%`,
                             width: `${width}%`,
-                            transform: `translateX(${shiftPx}px)`,
-                            transition: "transform 0.15s ease, opacity 0.2s ease",
-                            opacity: isBeingDragged ? 0 : 1,
-                            touchAction: "none",
                             ...(isOverflow
                               ? { backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(239,68,68,0.15) 4px, rgba(239,68,68,0.15) 8px)' }
                               : {
                                   backgroundColor: colorFill(task.colorIndex, false),
-                                  borderColor: isConflict || exceedsHardStop ? undefined : colorBorder(task.colorIndex, false),
+                                  borderColor: isConflict ? undefined : colorBorder(task.colorIndex, false),
                                 }),
                           }}
-                          title={
-                            exceedsHardStop
-                              ? "Esta tarefa ultrapassa o limite operacional das 15:30"
-                              : isConflict
-                              ? `⚠ Conflito de horário — ${task.artigo} ${formatClock(task.start)}–${formatClock(task.end)}`
-                              : `${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`
-                          }
+                          title={isConflict ? `⚠ Conflito de horário — ${task.artigo} ${formatClock(task.start)}–${formatClock(task.end)}` : `${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`}
                         >
                           {showLabel && <span className="truncate leading-tight">{labelPrefix}{task.artigo}</span>}
                           {showTime && <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">{formatClock(seg.start)}–{formatClock(seg.end)}</span>}
                         </div>
                       );
 
-                      // Dashed placeholder where the dragged block originally sits
-                      if (isBeingDragged && si === 0) {
+                      if (editMode && si === 0) {
+                        const targets = getAvailableTargets(task.id, row.label);
                         return (
-                          <div key={`wrap-${task.id}-${si}`} style={{ display: "contents" }}>
+                          <TaskBlockPopover
+                            key={`${task.id}-${si}`}
+                            task={task}
+                            operatorLabel={row.label}
+                            availableTargets={targets}
+                            onMove={(toOp) => onMoveTask(task.id, row.label, toOp)}
+                          >
                             {blockEl}
-                            <div
-                              key={`placeholder-${task.id}`}
-                              className="absolute top-1 h-[34px] rounded-md border-2 border-dashed border-muted-foreground/40 z-[5] pointer-events-none"
-                              style={{ left: `${left}%`, width: `${width}%`, background: "transparent" }}
-                            />
-                          </div>
+                          </TaskBlockPopover>
                         );
                       }
 
                       return blockEl;
-                    });
-                  })}
+                    })
+                  )}
                 </div>
               </div>
             );
@@ -882,7 +618,6 @@ export default function GanttChart({ schedule }: GanttChartProps) {
             allOperatorLabels={allOperatorLabels}
             onSwapOperators={overrides.swapOperators}
             onMoveTask={overrides.moveTask}
-            onReorderTasks={overrides.reorderTasks}
             getAvailableTargets={overrides.getAvailableTargets}
           />
         </CardContent>
