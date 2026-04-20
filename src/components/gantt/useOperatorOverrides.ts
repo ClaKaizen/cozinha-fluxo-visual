@@ -1,5 +1,18 @@
 import { useState, useMemo, useCallback } from "react";
-import type { DailyGanttSchedule, GanttRow, OperatorTask } from "./scheduler";
+import type { DailyGanttSchedule, GanttRow, OperatorTask, TimelineSegment } from "./scheduler";
+import { OPERATOR_HARD_STOP } from "./scheduler";
+
+const isDev = typeof import.meta !== "undefined" && (import.meta as any).env?.DEV;
+
+// ── Manual reorder state ────────────────────────────────
+// Stores per-operator ordered list of task IDs AND the anchor start time
+// for the first task of each operator (taken from the original schedule).
+export interface ReorderState {
+  /** operatorLabel → ordered taskIds */
+  order: Record<string, string[]>;
+  /** operatorLabel → anchor start minute for first task */
+  anchors: Record<string, number>;
+}
 
 // ── Types ────────────────────────────────────────────────
 
