@@ -87,6 +87,18 @@ export const useStore = create<AppState>()(
       tempOperators: [],
       sequencingRules: [],
       lunchSafeCategories: [],
+      operatorOverrides: {},
+
+      setOperatorOverrides: (dateStr, overrides) =>
+        set((state) => ({
+          operatorOverrides: { ...state.operatorOverrides, [dateStr]: overrides },
+        })),
+      clearOperatorOverrides: (dateStr) =>
+        set((state) => {
+          const next = { ...state.operatorOverrides };
+          delete next[dateStr];
+          return { operatorOverrides: next };
+        }),
 
       addEquipment: (e) => set((s) => ({ equipment: [...s.equipment, { ...e, id: uid() }] })),
       updateEquipment: (id, e) => set((s) => ({ equipment: s.equipment.map((eq) => eq.id === id ? { ...eq, ...e } : eq) })),
