@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
 import type { DailyGanttSchedule, GanttRow, OperatorTask, TimelineSegment } from "./scheduler";
-import { OPERATOR_HARD_STOP } from "./scheduler";
+import { OPERATOR_HARD_STOP, OPERATOR_START } from "./scheduler";
 
 const isDev = typeof import.meta !== "undefined" && (import.meta as any).env?.DEV;
 
