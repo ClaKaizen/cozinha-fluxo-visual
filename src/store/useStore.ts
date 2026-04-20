@@ -17,6 +17,10 @@ interface AppState {
   tempOperators: TempOperator[];
   sequencingRules: SequencingRule[];
   lunchSafeCategories: string[];
+  operatorOverrides: Record<string, Record<string, string[]>>;
+
+  setOperatorOverrides: (dateStr: string, overrides: Record<string, string[]>) => void;
+  clearOperatorOverrides: (dateStr: string) => void;
 
   addEquipment: (e: Omit<Equipment, 'id'>) => void;
   updateEquipment: (id: string, e: Partial<Equipment>) => void;

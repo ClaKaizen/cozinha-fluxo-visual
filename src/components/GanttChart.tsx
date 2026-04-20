@@ -34,6 +34,36 @@ const EQUIPMENT_COLOR_TOKENS = [
 
 interface GanttChartProps {
   schedule: DailyGanttSchedule;
+  dateStr: string;
+}
+
+// Pure: rebuild machine rows using effective operator timings (post-overrides)
+function computeEffectiveMachineRows(
+  effectiveOperatorRows: GanttRow<OperatorTask>[],
+  originalMachineRows: GanttRow<MachineTask>[],
+): GanttRow<MachineTask>[] {
+  const timingMap = new Map<string, { start: number; machineEnd: number }>();
+  for (const row of effectiveOperatorRows) {
+    for (const task of row.tasks) {
+      timingMap.set(task.id, {
+        start: task.start,
+        machineEnd: task.start + task.machineDuration,
+      });
+    }
+  }
+  return originalMachineRows.map((machineRow) => ({
+    ...machineRow,
+    tasks: machineRow.tasks
+      .map((mt) => {
+        const t = timingMap.get(mt.id);
+        if (!t) return mt;
+        const newSegments = mt.segments && mt.segments.length > 0
+          ? [{ ...mt.segments[0], start: t.start, end: t.machineEnd }]
+          : mt.segments;
+        return { ...mt, start: t.start, end: t.machineEnd, segments: newSegments };
+      })
+      .sort((a, b) => a.start - b.start),
+  }));
 }
 
 function colorFill(index: number, overflow: boolean) {
@@ -648,8 +678,8 @@ function GanttLegend({
 
 // ── Main Component ──────────────────────────────────────
 
-export default function GanttChart({ schedule }: GanttChartProps) {
-  const overrides = useOperatorOverrides(schedule);
+export default function GanttChart({ schedule, dateStr }: GanttChartProps) {
+  const overrides = useOperatorOverrides(schedule, dateStr);
 
   const legend = useMemo(() => {
     const seen = new Map<string, { id: string; label: string; colorIndex: number }>();
@@ -684,17 +714,24 @@ export default function GanttChart({ schedule }: GanttChartProps) {
 
   const sharedAxisEnd = Math.max(schedule.axisEnd, DAY_END + 30);
 
-  // Build effective schedule for OperatorTaskSequence
+  // Recompute machine rows from effective operator timings
+  const effectiveMachineRows = useMemo(
+    () => computeEffectiveMachineRows(overrides.effectiveRows, schedule.machineRows),
+    [overrides.effectiveRows, schedule.machineRows],
+  );
+
+  // Build effective schedule for downstream sections
   const effectiveSchedule: DailyGanttSchedule = {
     ...schedule,
     operatorRows: overrides.effectiveRows,
+    machineRows: effectiveMachineRows,
   };
 
   return (
     <div className="space-y-4">
       <MachineGanttSection
         title="Ocupação das Máquinas"
-        rows={schedule.machineRows}
+        rows={effectiveSchedule.machineRows}
         axisEnd={sharedAxisEnd}
         emptyMessage="Sem máquinas utilizadas neste dia."
         legend={legend}
