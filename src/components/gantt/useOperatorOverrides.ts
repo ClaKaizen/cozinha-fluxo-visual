@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
 import type { DailyGanttSchedule, GanttRow, OperatorTask, TimelineSegment } from "./scheduler";
-import { OPERATOR_HARD_STOP } from "./scheduler";
+import { OPERATOR_HARD_STOP, OPERATOR_START } from "./scheduler";
 
 const isDev = typeof import.meta !== "undefined" && (import.meta as any).env?.DEV;
 
@@ -164,17 +164,24 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   const [savedOverrides, setSavedOverrides] = useState<ManualOverride>({});
   const [draftReorder, setDraftReorder] = useState<Record<string, string[]>>({});
   const [savedReorder, setSavedReorder] = useState<Record<string, string[]>>({});
+  // Snapshot of original first-task start per operator at the moment edit
+  // mode was entered. This is the immutable anchor used by recomputation.
+  const [editAnchors, setEditAnchors] = useState<Record<string, number> | null>(null);
 
-  const anchors = useMemo(() => {
+  const baseAnchors = useMemo(() => {
     const map: Record<string, number> = {};
     for (const row of schedule.operatorRows) {
       if (row.tasks.length > 0) {
         const first = [...row.tasks].sort((a, b) => a.start - b.start)[0];
         map[row.label] = first.start;
+      } else {
+        map[row.label] = OPERATOR_START;
       }
     }
     return map;
   }, [schedule.operatorRows]);
+
+  const anchors = editMode && editAnchors ? editAnchors : baseAnchors;
 
   const activeOverrides = editMode ? draftOverrides : savedOverrides;
   const activeReorder = editMode ? draftReorder : savedReorder;
@@ -210,12 +217,14 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   const enterEditMode = useCallback(() => {
     setDraftOverrides({ ...savedOverrides });
     setDraftReorder({ ...savedReorder });
+    setEditAnchors({ ...baseAnchors });
     setEditMode(true);
-  }, [savedOverrides, savedReorder]);
+  }, [savedOverrides, savedReorder, baseAnchors]);
 
   const cancelEdit = useCallback(() => {
     setDraftOverrides({});
     setDraftReorder({});
+    setEditAnchors(null);
     setEditMode(false);
   }, []);
 
@@ -223,6 +232,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
     if (hasConflicts) return;
     setSavedOverrides({ ...draftOverrides });
     setSavedReorder({ ...draftReorder });
+    setEditAnchors(null);
     setEditMode(false);
   }, [draftOverrides, draftReorder, hasConflicts]);
 
@@ -231,6 +241,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
     setDraftOverrides({});
     setSavedReorder({});
     setDraftReorder({});
+    setEditAnchors(null);
     setEditMode(false);
   }, []);
 
