@@ -873,20 +873,24 @@ function jointSchedule(
   }
 
   /** Register or update commitment when an operator is assigned a task.
-   *  Only creates commitments for non-multiOperador equipment. */
+   *  PER-OPERATOR GROUPING: each operator must finish all remaining batches of the
+   *  artigo they just started (assigned to them) before switching to a different
+   *  artigo. Multiple operators can still work the same artigo in parallel. */
   function registerCommitment(opName: string, task: PlanningTask, pendingTasks: PlanningTask[]) {
-    const eq = equipmentMap.get(task.equipmentId);
-    const isMulti = eq?.multiOperador ?? true;
-    // Only commit for non-multiOperador equipment (task continuity on Fritadeira etc.)
-    if (!isMulti) {
-      const remaining = pendingTasks.filter(t => t.artigo === task.artigo).length;
-      if (remaining > 0) {
-        operatorCommitments.set(opName, { artigo: task.artigo, equipmentId: task.equipmentId, remaining });
-      } else {
-        operatorCommitments.delete(opName);
-      }
+    // Count remaining batches of this artigo+equipment in the pending pool that
+    // could still be picked by this operator.
+    const remaining = pendingTasks.filter(
+      (t) => t.artigo === task.artigo && t.equipmentId === task.equipmentId,
+    ).length;
+    if (remaining > 0) {
+      operatorCommitments.set(opName, {
+        artigo: task.artigo,
+        equipmentId: task.equipmentId,
+        remaining,
+      });
+    } else {
+      operatorCommitments.delete(opName);
     }
-    // For multiOperador equipment, no commitment — load balancing distributes freely
   }
 
   function tryScheduleAll(allowEmergency: boolean, tasksToSchedule: PlanningTask[]): PlanningTask[] {
