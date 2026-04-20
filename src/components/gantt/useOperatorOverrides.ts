@@ -172,56 +172,114 @@ function canMoveTaskTo(
 
 // ── Timeline recomputation ───────────────────────────────
 //
-// First task of each operator keeps its ORIGINAL scheduled start.
-// Each subsequent task starts at: previousTask.start + previousTask.operatorDuration.
-// T.Máquina (machineDuration) is recomputed from the new start but does NOT
-// affect operator sequencing.
-function recomputeOperatorTimeline(
-  tasks: OperatorTask[],
-  anchorStart: number | undefined,
-): OperatorTask[] {
-  if (tasks.length === 0) return tasks;
-  const result: OperatorTask[] = [];
-  let cursor = anchorStart ?? tasks[0].start;
-  for (let i = 0; i < tasks.length; i++) {
-    const t = tasks[i];
-    const start = i === 0 ? (anchorStart ?? t.start) : cursor;
-    const machineDuration = Math.max(t.machineDuration, t.operatorDuration);
-    const end = start + machineDuration;
-    const seg: TimelineSegment = { start, end, overflow: end > OPERATOR_HARD_STOP };
-    result.push({ ...t, start, end, segments: [seg] });
-    cursor = start + (t.operatorDuration || 0);
-  }
-  return result;
-}
-
+// Per-operator rule:
+//   - First task of each operator keeps its ORIGINAL scheduled start (anchor).
+//   - Each subsequent task's operator-cursor advances by previous T.Homem.
+//
+// Cross-operator rule (Bug 2 fix):
+//   - Equipment units are SHARED across all operators. For each task we must
+//     also wait until a unit of the required equipment is free.
+//   - We therefore process all operators in PARALLEL TIME ORDER (not row by
+//     row): at each step we pick the operator whose next task can start the
+//     earliest, place that task, advance that operator's cursor and the
+//     equipment unit's release time, and repeat.
+//   - The per-operator task ordering is preserved exactly as supplied —
+//     we never reorder tasks of different types within a single operator.
 function applyReorderAndRecompute(
   rows: GanttRow<OperatorTask>[],
   overrides: ManualOverride,
   reorder: Record<string, string[]>,
   anchors: Record<string, number>,
+  machineRows: GanttRow<MachineTask>[],
 ): GanttRow<OperatorTask>[] {
   const assigned = applyOverrides(rows, overrides);
-  return assigned.map((row) => {
+
+  // Apply manual reorder per row, but DO NOT recompute times yet.
+  const orderedRows = assigned.map((row) => {
     const customOrder = reorder[row.label];
-    let ordered = row.tasks;
-    if (customOrder && customOrder.length > 0) {
-      const byId = new Map(row.tasks.map((t) => [t.id, t]));
-      const ord: OperatorTask[] = [];
-      for (const id of customOrder) {
-        const t = byId.get(id);
-        if (t) {
-          ord.push(t);
-          byId.delete(id);
-        }
+    if (!customOrder || customOrder.length === 0) return row;
+    const byId = new Map(row.tasks.map((t) => [t.id, t]));
+    const ord: OperatorTask[] = [];
+    for (const id of customOrder) {
+      const t = byId.get(id);
+      if (t) {
+        ord.push(t);
+        byId.delete(id);
       }
-      for (const t of byId.values()) ord.push(t);
-      ordered = ord;
     }
-    const recomputed = recomputeOperatorTimeline(ordered, anchors[row.label]);
-    return { ...row, tasks: recomputed };
+    for (const t of byId.values()) ord.push(t);
+    return { ...row, tasks: ord };
   });
+
+  // Build the shared equipment timeline. Exclude the operator-row tasks
+  // themselves — they are about to be re-placed.
+  const allOpTaskIds = new Set<string>();
+  for (const r of orderedRows) for (const t of r.tasks) allOpTaskIds.add(t.id);
+  const eqTimeline = buildEqTimelineFromMachineRows(machineRows, allOpTaskIds);
+
+  // Per-operator queues + cursors.
+  const queues: { label: string; remaining: OperatorTask[]; placed: OperatorTask[]; cursor: number; placedCount: number }[] =
+    orderedRows.map((row) => ({
+      label: row.label,
+      remaining: [...row.tasks],
+      placed: [],
+      cursor: anchors[row.label] ?? OPERATOR_START,
+      placedCount: 0,
+    }));
+
+  // Iterate: pick the operator whose next task can start the earliest, given
+  // its cursor (or anchor for first task) AND the shared equipment timeline.
+  let safety = queues.reduce((s, q) => s + q.remaining.length, 0) + 5;
+  while (safety-- > 0) {
+    let bestQueueIdx = -1;
+    let bestStart = Infinity;
+
+    for (let i = 0; i < queues.length; i++) {
+      const q = queues[i];
+      if (q.remaining.length === 0) continue;
+      const t = q.remaining[0];
+      const isFirst = q.placedCount === 0;
+      // The first task is anchored — its start is fixed regardless of
+      // current equipment contention (per spec: anchor must not move).
+      const opFreeTime = isFirst ? (anchors[q.label] ?? q.cursor) : q.cursor;
+      const eqRelease = eqTimeline.earliestRelease(t.equipmentId);
+      const start = isFirst ? opFreeTime : Math.max(opFreeTime, eqRelease);
+
+      if (start < bestStart) {
+        bestStart = start;
+        bestQueueIdx = i;
+      }
+    }
+
+    if (bestQueueIdx < 0) break;
+    const q = queues[bestQueueIdx];
+    const t = q.remaining.shift()!;
+    const isFirst = q.placedCount === 0;
+
+    const machineDuration = Math.max(t.machineDuration, t.operatorDuration);
+    let placedStart: number;
+    if (isFirst) {
+      placedStart = anchors[q.label] ?? q.cursor;
+      eqTimeline.assign(t.equipmentId, machineDuration, placedStart);
+    } else {
+      const res = eqTimeline.assign(t.equipmentId, machineDuration, q.cursor);
+      placedStart = res.start;
+    }
+
+    const end = placedStart + machineDuration;
+    const seg: TimelineSegment = { start: placedStart, end, overflow: end > OPERATOR_HARD_STOP };
+    q.placed.push({ ...t, start: placedStart, end, segments: [seg] });
+    q.placedCount += 1;
+    q.cursor = placedStart + (t.operatorDuration || 0);
+  }
+
+  if (isDev && safety <= 0) {
+    console.warn("[useOperatorOverrides] recompute safety limit hit");
+  }
+
+  return orderedRows.map((row, i) => ({ ...row, tasks: queues[i].placed }));
 }
+
 
 // ── Hook ────────────────────────────────────────────────
 
