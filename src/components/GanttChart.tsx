@@ -42,28 +42,92 @@ function computeEffectiveMachineRows(
   effectiveOperatorRows: GanttRow<OperatorTask>[],
   originalMachineRows: GanttRow<MachineTask>[],
 ): GanttRow<MachineTask>[] {
+  // STEP 1 — timingMap keyed by machineTaskId
   const timingMap = new Map<string, { start: number; machineEnd: number }>();
   for (const row of effectiveOperatorRows) {
     for (const task of row.tasks) {
-      timingMap.set(task.id, {
-        start: task.start,
-        machineEnd: task.start + task.machineDuration,
+      if (task.machineTaskId) {
+        timingMap.set(task.machineTaskId, {
+          start: task.start,
+          machineEnd: task.start + task.machineDuration,
+        });
+      }
+    }
+  }
+
+  // STEP 2 — apply new timings to all machine tasks
+  const updatedTasks: MachineTask[] = originalMachineRows.flatMap((row) =>
+    row.tasks.map((mt) => {
+      const t = timingMap.get(mt.id);
+      if (!t) return mt;
+      const newSegments = mt.segments && mt.segments.length > 0
+        ? [{ ...mt.segments[0], start: t.start, end: t.machineEnd }]
+        : mt.segments;
+      return { ...mt, start: t.start, end: t.machineEnd, segments: newSegments };
+    }),
+  );
+
+  // STEP 3 — group rows by equipment prefix (label without trailing number)
+  const prefixOf = (label: string) => label.replace(/\s+\d+$/, "").trim();
+
+  const equipmentGroups = new Map<string, {
+    unitCount: number;
+    tasks: MachineTask[];
+  }>();
+  for (const row of originalMachineRows) {
+    const prefix = prefixOf(row.label);
+    if (!equipmentGroups.has(prefix)) {
+      equipmentGroups.set(prefix, { unitCount: 0, tasks: [] });
+    }
+    equipmentGroups.get(prefix)!.unitCount++;
+  }
+
+  // Map task id -> prefix via original row membership
+  const taskPrefix = new Map<string, string>();
+  for (const row of originalMachineRows) {
+    const prefix = prefixOf(row.label);
+    for (const t of row.tasks) taskPrefix.set(t.id, prefix);
+  }
+  for (const mt of updatedTasks) {
+    const prefix = taskPrefix.get(mt.id);
+    if (!prefix) continue;
+    equipmentGroups.get(prefix)?.tasks.push(mt);
+  }
+
+  // STEP 4 — greedy interval packing per equipment group
+  const resultRows: GanttRow<MachineTask>[] = [];
+  for (const [prefix, group] of equipmentGroups) {
+    const sortedTasks = [...group.tasks].sort((a, b) => a.start - b.start);
+    const slots: MachineTask[][] = Array.from({ length: group.unitCount }, () => []);
+    const slotEnd: number[] = new Array(group.unitCount).fill(0);
+
+    for (const task of sortedTasks) {
+      let assigned = false;
+      for (let i = 0; i < group.unitCount; i++) {
+        if (slotEnd[i] <= task.start) {
+          slots[i].push(task);
+          slotEnd[i] = task.end;
+          assigned = true;
+          break;
+        }
+      }
+      if (!assigned) {
+        const leastBusy = slotEnd.indexOf(Math.min(...slotEnd));
+        slots[leastBusy].push(task);
+        slotEnd[leastBusy] = task.end;
+      }
+    }
+
+    const prefixRows = originalMachineRows.filter((r) => prefixOf(r.label) === prefix);
+    for (let i = 0; i < prefixRows.length; i++) {
+      resultRows.push({
+        ...prefixRows[i],
+        tasks: slots[i] ?? [],
       });
     }
   }
-  return originalMachineRows.map((machineRow) => ({
-    ...machineRow,
-    tasks: machineRow.tasks
-      .map((mt) => {
-        const t = timingMap.get(mt.id);
-        if (!t) return mt;
-        const newSegments = mt.segments && mt.segments.length > 0
-          ? [{ ...mt.segments[0], start: t.start, end: t.machineEnd }]
-          : mt.segments;
-        return { ...mt, start: t.start, end: t.machineEnd, segments: newSegments };
-      })
-      .sort((a, b) => a.start - b.start),
-  }));
+
+  return resultRows;
 }
 
 function colorFill(index: number, overflow: boolean) {
