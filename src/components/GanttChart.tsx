@@ -440,8 +440,32 @@ function OperatorGanttSection({
                       Sem tarefas atribuídas
                     </div>
                   )}
-                  {row.tasks.map((task) =>
-                    task.segments.map((seg, si) => {
+                  {row.tasks.map((task) => {
+                    // Clipa cada segmento à janela obrigatória 12:00–13:00.
+                    // Nenhum bloco pode renderizar entre 720 e 780.
+                    const MAND_LUNCH_START = 720;
+                    const MAND_LUNCH_END = 780;
+                    type RenderSeg = { start: number; end: number; overflow: boolean; origIndex: number };
+                    const renderSegs: RenderSeg[] = [];
+                    task.segments.forEach((seg, origIdx) => {
+                      let s = seg.start;
+                      let e = seg.end;
+                      // Se estiver totalmente dentro da pausa, saltar
+                      if (s >= MAND_LUNCH_START && e <= MAND_LUNCH_END) return;
+                      // Se inicia dentro da pausa, empurrar para 13:00
+                      if (s >= MAND_LUNCH_START && s < MAND_LUNCH_END) s = MAND_LUNCH_END;
+                      // Se termina dentro da pausa, recuar para 12:00
+                      if (e > MAND_LUNCH_START && e <= MAND_LUNCH_END) e = MAND_LUNCH_START;
+                      // Se atravessa toda a pausa, dividir em dois
+                      if (s < MAND_LUNCH_START && e > MAND_LUNCH_END) {
+                        renderSegs.push({ start: s, end: MAND_LUNCH_START, overflow: seg.overflow, origIndex: origIdx });
+                        renderSegs.push({ start: MAND_LUNCH_END, end: e, overflow: seg.overflow, origIndex: origIdx });
+                        return;
+                      }
+                      if (e > s) renderSegs.push({ start: s, end: e, overflow: seg.overflow, origIndex: origIdx });
+                    });
+
+                    return renderSegs.map((seg, si) => {
                       const left = toPercent(seg.start);
                       const width = ((seg.end - seg.start) / totalSpan) * 100;
                       const widthPx = (width / 100) * chartWidth;
@@ -516,8 +540,8 @@ function OperatorGanttSection({
                       }
 
                       return blockEl;
-                    })
-                  )}
+                    });
+                  })}
                   {editMode && dropTarget?.opLabel === row.label && (() => {
                     // Compute insertion indicator left position based on first-segment task blocks
                     const firstSegs = row.tasks.map((t) => t.segments[0]).filter(Boolean);
