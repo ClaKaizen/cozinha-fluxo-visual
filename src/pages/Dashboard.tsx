@@ -421,7 +421,7 @@ export default function Dashboard() {
       <OperatorSequence schedule={schedule} operatorHoursMap={operatorHoursMap} />
 
       {/* Gantt Chart */}
-      <GanttChart schedule={schedule} />
+      <GanttChart schedule={schedule} dateStr={normalizeDateKey(dateStr)} />
     </div>
   );
 }

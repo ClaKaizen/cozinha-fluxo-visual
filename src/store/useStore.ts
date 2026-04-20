@@ -17,6 +17,10 @@ interface AppState {
   tempOperators: TempOperator[];
   sequencingRules: SequencingRule[];
   lunchSafeCategories: string[];
+  operatorOverrides: Record<string, Record<string, string[]>>;
+
+  setOperatorOverrides: (dateStr: string, overrides: Record<string, string[]>) => void;
+  clearOperatorOverrides: (dateStr: string) => void;
 
   addEquipment: (e: Omit<Equipment, 'id'>) => void;
   updateEquipment: (id: string, e: Partial<Equipment>) => void;
@@ -83,6 +87,18 @@ export const useStore = create<AppState>()(
       tempOperators: [],
       sequencingRules: [],
       lunchSafeCategories: [],
+      operatorOverrides: {},
+
+      setOperatorOverrides: (dateStr, overrides) =>
+        set((state) => ({
+          operatorOverrides: { ...state.operatorOverrides, [dateStr]: overrides },
+        })),
+      clearOperatorOverrides: (dateStr) =>
+        set((state) => {
+          const next = { ...state.operatorOverrides };
+          delete next[dateStr];
+          return { operatorOverrides: next };
+        }),
 
       addEquipment: (e) => set((s) => ({ equipment: [...s.equipment, { ...e, id: uid() }] })),
       updateEquipment: (id, e) => set((s) => ({ equipment: s.equipment.map((eq) => eq.id === id ? { ...eq, ...e } : eq) })),

@@ -7,6 +7,7 @@ import type {
   TimelineSegment,
 } from "./scheduler";
 import { OPERATOR_HARD_STOP, formatClock } from "./scheduler";
+import { useStore } from "@/store/useStore";
 
 const isDev = import.meta.env?.DEV ?? false;
 
@@ -227,10 +228,14 @@ function canMoveTaskTo(
 
 // ── Hook ────────────────────────────────────────────────
 
-export function useOperatorOverrides(schedule: DailyGanttSchedule) {
+export function useOperatorOverrides(schedule: DailyGanttSchedule, dateStr: string) {
+  const operatorOverridesMap = useStore((s) => s.operatorOverrides);
+  const setOperatorOverridesStore = useStore((s) => s.setOperatorOverrides);
+  const clearOperatorOverridesStore = useStore((s) => s.clearOperatorOverrides);
+
   const [editMode, setEditMode] = useState(false);
   const [draftOverrides, setDraftOverrides] = useState<ManualOverride>({});
-  const [savedOverrides, setSavedOverrides] = useState<ManualOverride>({});
+  const savedOverrides: ManualOverride = operatorOverridesMap[dateStr] ?? {};
 
   // Effective rows = original + saved overrides (outside edit mode)
   // or original + draft overrides (inside edit mode)
@@ -269,21 +274,21 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   }, [savedOverrides]);
 
   const cancelEdit = useCallback(() => {
-    setDraftOverrides({});
+    setDraftOverrides({ ...savedOverrides });
     setEditMode(false);
-  }, []);
+  }, [savedOverrides]);
 
   const saveOverrides = useCallback(() => {
     if (hasConflicts) return;
-    setSavedOverrides({ ...draftOverrides });
+    setOperatorOverridesStore(dateStr, { ...draftOverrides });
     setEditMode(false);
-  }, [draftOverrides, hasConflicts]);
+  }, [draftOverrides, hasConflicts, dateStr, setOperatorOverridesStore]);
 
   const resetOverrides = useCallback(() => {
-    setSavedOverrides({});
+    clearOperatorOverridesStore(dateStr);
     setDraftOverrides({});
     setEditMode(false);
-  }, []);
+  }, [dateStr, clearOperatorOverridesStore]);
 
   // Swap ALL tasks between two operators
   const swapOperators = useCallback(
