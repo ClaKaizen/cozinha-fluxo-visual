@@ -272,7 +272,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   // Move a single task to a different operator
   const moveTask = useCallback(
     (taskId: string, fromOp: string, toOp: string, insertAtIndex?: number) => {
-      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides);
+      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides, schedule.operatorLunchBreaks);
 
       // Build new overrides ensuring all task assignments are captured
       const newOverrides: ManualOverride = {};
@@ -298,7 +298,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   // Get available targets for a single task move (no conflict)
   const getAvailableTargets = useCallback(
     (taskId: string, fromOp: string): string[] => {
-      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides);
+      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides, schedule.operatorLunchBreaks);
       const task = currentRows
         .flatMap((r) => r.tasks)
         .find((t) => t.id === taskId);
