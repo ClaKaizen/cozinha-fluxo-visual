@@ -1,8 +1,75 @@
 import { useState, useMemo, useCallback } from "react";
-import type { DailyGanttSchedule, GanttRow, OperatorTask, TimelineSegment } from "./scheduler";
-import { OPERATOR_HARD_STOP, OPERATOR_START } from "./scheduler";
+import type { DailyGanttSchedule, GanttRow, MachineTask, OperatorTask, TimelineSegment } from "./scheduler";
+import { OPERATOR_HARD_STOP, OPERATOR_START, DAY_START } from "./scheduler";
 
 const isDev = typeof import.meta !== "undefined" && (import.meta as any).env?.DEV;
+
+// ── Shared equipment-availability timeline (for post-drag recompute) ──
+// Mirrors the scheduler's MachineSlotTracker contract: per equipment id,
+// an array of release timestamps — one per physical unit. Built from the
+// schedule's machineRows so we don't need the Equipment[] config here.
+interface EqTimeline {
+  earliestRelease(equipmentId: string): number;
+  assign(equipmentId: string, machineDuration: number, notBefore: number): { start: number; end: number };
+}
+
+function buildEqTimelineFromMachineRows(
+  machineRows: GanttRow<MachineTask>[],
+  excludeTaskIds: Set<string>,
+): EqTimeline {
+  // Each machineRow corresponds to ONE physical unit. Group rows by equipmentId.
+  const slots = new Map<string, number[]>();
+  // We need stable per-unit slots: use rowLabel → unitIndex mapping per equipment.
+  const rowsByEq = new Map<string, GanttRow<MachineTask>[]>();
+  for (const row of machineRows) {
+    // Pick the equipmentId from the first task on the row, fallback to label parsing.
+    const eqId = row.tasks[0]?.equipmentId;
+    if (!eqId) continue;
+    const list = rowsByEq.get(eqId) ?? [];
+    list.push(row);
+    rowsByEq.set(eqId, list);
+  }
+  for (const [eqId, rows] of rowsByEq) {
+    const releases: number[] = [];
+    for (const row of rows) {
+      // Initial release = max end of NON-excluded tasks already on this unit
+      let r = DAY_START;
+      for (const t of row.tasks) {
+        if (excludeTaskIds.has(t.id)) continue;
+        if (t.end > r) r = t.end;
+      }
+      releases.push(r);
+    }
+    slots.set(eqId, releases);
+  }
+
+  function pickEarliest(arr: number[]): number {
+    let idx = 0;
+    for (let i = 1; i < arr.length; i++) if (arr[i] < arr[idx]) idx = i;
+    return idx;
+  }
+
+  return {
+    earliestRelease(equipmentId) {
+      const arr = slots.get(equipmentId);
+      if (!arr || arr.length === 0) return DAY_START;
+      return Math.min(...arr);
+    },
+    assign(equipmentId, machineDuration, notBefore) {
+      const arr = slots.get(equipmentId);
+      if (!arr || arr.length === 0) {
+        return { start: notBefore, end: notBefore + machineDuration };
+      }
+      const i = pickEarliest(arr);
+      const start = Math.max(arr[i], notBefore);
+      const end = start + machineDuration;
+      arr[i] = end;
+      return { start, end };
+    },
+  };
+}
+
+
 
 // ── Manual reorder state ────────────────────────────────
 // Stores per-operator ordered list of task IDs AND the anchor start time
