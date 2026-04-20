@@ -217,12 +217,14 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   const enterEditMode = useCallback(() => {
     setDraftOverrides({ ...savedOverrides });
     setDraftReorder({ ...savedReorder });
+    setEditAnchors({ ...baseAnchors });
     setEditMode(true);
-  }, [savedOverrides, savedReorder]);
+  }, [savedOverrides, savedReorder, baseAnchors]);
 
   const cancelEdit = useCallback(() => {
     setDraftOverrides({});
     setDraftReorder({});
+    setEditAnchors(null);
     setEditMode(false);
   }, []);
 
@@ -230,6 +232,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
     if (hasConflicts) return;
     setSavedOverrides({ ...draftOverrides });
     setSavedReorder({ ...draftReorder });
+    setEditAnchors(null);
     setEditMode(false);
   }, [draftOverrides, draftReorder, hasConflicts]);
 
@@ -238,6 +241,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
     setDraftOverrides({});
     setSavedReorder({});
     setDraftReorder({});
+    setEditAnchors(null);
     setEditMode(false);
   }, []);
 
