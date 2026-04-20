@@ -1,5 +1,18 @@
 import { useState, useMemo, useCallback } from "react";
-import type { DailyGanttSchedule, GanttRow, OperatorTask } from "./scheduler";
+import type { DailyGanttSchedule, GanttRow, OperatorTask, TimelineSegment } from "./scheduler";
+import { OPERATOR_HARD_STOP } from "./scheduler";
+
+const isDev = typeof import.meta !== "undefined" && (import.meta as any).env?.DEV;
+
+// ── Manual reorder state ────────────────────────────────
+// Stores per-operator ordered list of task IDs AND the anchor start time
+// for the first task of each operator (taken from the original schedule).
+export interface ReorderState {
+  /** operatorLabel → ordered taskIds */
+  order: Record<string, string[]>;
+  /** operatorLabel → anchor start minute for first task */
+  anchors: Record<string, number>;
+}
 
 // ── Types ────────────────────────────────────────────────
 
@@ -90,20 +103,85 @@ function canMoveTaskTo(
   return true;
 }
 
+// ── Timeline recomputation ───────────────────────────────
+//
+// First task of each operator keeps its ORIGINAL scheduled start.
+// Each subsequent task starts at: previousTask.start + previousTask.operatorDuration.
+// T.Máquina (machineDuration) is recomputed from the new start but does NOT
+// affect operator sequencing.
+function recomputeOperatorTimeline(
+  tasks: OperatorTask[],
+  anchorStart: number | undefined,
+): OperatorTask[] {
+  if (tasks.length === 0) return tasks;
+  const result: OperatorTask[] = [];
+  let cursor = anchorStart ?? tasks[0].start;
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    const start = i === 0 ? (anchorStart ?? t.start) : cursor;
+    const machineDuration = Math.max(t.machineDuration, t.operatorDuration);
+    const end = start + machineDuration;
+    const seg: TimelineSegment = { start, end, overflow: end > OPERATOR_HARD_STOP };
+    result.push({ ...t, start, end, segments: [seg] });
+    cursor = start + (t.operatorDuration || 0);
+  }
+  return result;
+}
+
+function applyReorderAndRecompute(
+  rows: GanttRow<OperatorTask>[],
+  overrides: ManualOverride,
+  reorder: Record<string, string[]>,
+  anchors: Record<string, number>,
+): GanttRow<OperatorTask>[] {
+  const assigned = applyOverrides(rows, overrides);
+  return assigned.map((row) => {
+    const customOrder = reorder[row.label];
+    let ordered = row.tasks;
+    if (customOrder && customOrder.length > 0) {
+      const byId = new Map(row.tasks.map((t) => [t.id, t]));
+      const ord: OperatorTask[] = [];
+      for (const id of customOrder) {
+        const t = byId.get(id);
+        if (t) {
+          ord.push(t);
+          byId.delete(id);
+        }
+      }
+      for (const t of byId.values()) ord.push(t);
+      ordered = ord;
+    }
+    const recomputed = recomputeOperatorTimeline(ordered, anchors[row.label]);
+    return { ...row, tasks: recomputed };
+  });
+}
+
 // ── Hook ────────────────────────────────────────────────
 
 export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   const [editMode, setEditMode] = useState(false);
   const [draftOverrides, setDraftOverrides] = useState<ManualOverride>({});
   const [savedOverrides, setSavedOverrides] = useState<ManualOverride>({});
+  const [draftReorder, setDraftReorder] = useState<Record<string, string[]>>({});
+  const [savedReorder, setSavedReorder] = useState<Record<string, string[]>>({});
 
-  // Effective rows = original + saved overrides (outside edit mode)
-  // or original + draft overrides (inside edit mode)
+  const anchors = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const row of schedule.operatorRows) {
+      if (row.tasks.length > 0) {
+        const first = [...row.tasks].sort((a, b) => a.start - b.start)[0];
+        map[row.label] = first.start;
+      }
+    }
+    return map;
+  }, [schedule.operatorRows]);
+
   const activeOverrides = editMode ? draftOverrides : savedOverrides;
+  const activeReorder = editMode ? draftReorder : savedReorder;
 
   const effectiveRows = useMemo(
-    () => applyOverrides(schedule.operatorRows, activeOverrides),
-    [schedule.operatorRows, activeOverrides],
+    () => applyReorderAndRecompute(schedule.operatorRows, activeOverrides, activeReorder, anchors),
+    [schedule.operatorRows, activeOverrides, activeReorder, anchors],
   );
 
   const conflicts = useMemo(() => detectConflicts(effectiveRows), [effectiveRows]);
@@ -123,87 +201,125 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
     for (const key of Object.keys(activeOverrides)) {
       if (activeOverrides[key].length > 0) set.add(key);
     }
+    for (const key of Object.keys(activeReorder)) {
+      if (activeReorder[key].length > 0) set.add(key);
+    }
     return set;
-  }, [activeOverrides]);
-
-  // ── Actions ──────────────────────────────────────────
+  }, [activeOverrides, activeReorder]);
 
   const enterEditMode = useCallback(() => {
     setDraftOverrides({ ...savedOverrides });
+    setDraftReorder({ ...savedReorder });
     setEditMode(true);
-  }, [savedOverrides]);
+  }, [savedOverrides, savedReorder]);
 
   const cancelEdit = useCallback(() => {
     setDraftOverrides({});
+    setDraftReorder({});
     setEditMode(false);
   }, []);
 
   const saveOverrides = useCallback(() => {
     if (hasConflicts) return;
     setSavedOverrides({ ...draftOverrides });
+    setSavedReorder({ ...draftReorder });
     setEditMode(false);
-  }, [draftOverrides, hasConflicts]);
+  }, [draftOverrides, draftReorder, hasConflicts]);
 
   const resetOverrides = useCallback(() => {
     setSavedOverrides({});
     setDraftOverrides({});
+    setSavedReorder({});
+    setDraftReorder({});
     setEditMode(false);
   }, []);
 
-  // Swap ALL tasks between two operators
   const swapOperators = useCallback(
     (opA: string, opB: string) => {
-      // Get current effective assignment
-      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides);
+      const currentRows = applyReorderAndRecompute(schedule.operatorRows, draftOverrides, draftReorder, anchors);
       const rowA = currentRows.find((r) => r.label === opA);
       const rowB = currentRows.find((r) => r.label === opB);
       if (!rowA || !rowB) return;
-
       const newOverrides = { ...draftOverrides };
-      // opA gets opB's tasks, opB gets opA's tasks
       newOverrides[opA] = rowB.tasks.map((t) => t.id);
       newOverrides[opB] = rowA.tasks.map((t) => t.id);
+      const newReorder = { ...draftReorder };
+      delete newReorder[opA];
+      delete newReorder[opB];
       setDraftOverrides(newOverrides);
+      setDraftReorder(newReorder);
     },
-    [schedule.operatorRows, draftOverrides],
+    [schedule.operatorRows, draftOverrides, draftReorder, anchors],
   );
 
-  // Move a single task to a different operator
   const moveTask = useCallback(
     (taskId: string, fromOp: string, toOp: string) => {
-      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides);
-
-      // Build new overrides ensuring all task assignments are captured
+      const currentRows = applyReorderAndRecompute(schedule.operatorRows, draftOverrides, draftReorder, anchors);
       const newOverrides: ManualOverride = {};
       for (const row of currentRows) {
         newOverrides[row.label] = row.tasks
           .map((t) => t.id)
           .filter((id) => (row.label === fromOp ? id !== taskId : true));
       }
-      // Add the moved task to target
       if (!newOverrides[toOp]) newOverrides[toOp] = [];
       newOverrides[toOp].push(taskId);
-
       setDraftOverrides(newOverrides);
     },
-    [schedule.operatorRows, draftOverrides],
+    [schedule.operatorRows, draftOverrides, draftReorder, anchors],
   );
 
-  // Get available targets for a single task move (no conflict)
+  // NEW: drag-and-drop reorder/move with explicit insert index
+  const reorderTasks = useCallback(
+    (taskId: string, fromOp: string, toOp: string, insertIndex: number) => {
+      const currentRows = applyReorderAndRecompute(schedule.operatorRows, draftOverrides, draftReorder, anchors);
+      const orderMap: Record<string, string[]> = {};
+      for (const row of currentRows) {
+        orderMap[row.label] = row.tasks.map((t) => t.id);
+      }
+      const fromList = orderMap[fromOp] ?? [];
+      const srcIdx = fromList.indexOf(taskId);
+      if (srcIdx === -1) return;
+      fromList.splice(srcIdx, 1);
+      orderMap[fromOp] = fromList;
+
+      const toList = orderMap[toOp] ?? [];
+      let idx = insertIndex;
+      if (fromOp === toOp && srcIdx < insertIndex) idx = insertIndex - 1;
+      idx = Math.max(0, Math.min(idx, toList.length));
+      toList.splice(idx, 0, taskId);
+      orderMap[toOp] = toList;
+
+      const newOverrides: ManualOverride = {};
+      for (const label of Object.keys(orderMap)) {
+        newOverrides[label] = [...orderMap[label]];
+      }
+      const newReorder: Record<string, string[]> = { ...draftReorder };
+      newReorder[fromOp] = [...orderMap[fromOp]];
+      newReorder[toOp] = [...orderMap[toOp]];
+
+      if (isDev) {
+        console.log("[DnD] reorderTasks", { taskId, fromOp, toOp, insertIndex });
+      }
+
+      setDraftOverrides(newOverrides);
+      setDraftReorder(newReorder);
+    },
+    [schedule.operatorRows, draftOverrides, draftReorder, anchors],
+  );
+
   const getAvailableTargets = useCallback(
     (taskId: string, fromOp: string): string[] => {
-      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides);
+      const currentRows = applyReorderAndRecompute(schedule.operatorRows, draftOverrides, draftReorder, anchors);
       const task = currentRows
         .flatMap((r) => r.tasks)
         .find((t) => t.id === taskId);
       if (!task) return [];
-
       return currentRows
         .filter((r) => r.label !== fromOp)
         .filter((r) => canMoveTaskTo(task, r, taskId))
         .map((r) => r.label);
     },
-    [schedule.operatorRows, draftOverrides],
+    [schedule.operatorRows, draftOverrides, draftReorder, anchors],
   );
 
   return {
@@ -220,6 +336,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
     resetOverrides,
     swapOperators,
     moveTask,
+    reorderTasks,
     getAvailableTargets,
   };
 }
