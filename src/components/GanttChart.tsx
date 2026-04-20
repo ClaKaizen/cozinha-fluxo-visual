@@ -279,7 +279,15 @@ function MachineGanttSection(props: {
   );
 }
 
-// ── Operator Gantt Section (with edit mode) ─────────────
+// ── Operator Gantt Section (with edit mode + native HTML5 DnD) ─
+
+const isDev = typeof import.meta !== "undefined" && (import.meta as any).env?.DEV;
+
+interface DragState {
+  taskId: string;
+  fromOp: string;
+  /** ID of the task most recently flashed after a drop (for visual confirmation) */
+}
 
 function OperatorGanttSection({
   rows,
@@ -292,6 +300,7 @@ function OperatorGanttSection({
   allOperatorLabels,
   onSwapOperators,
   onMoveTask,
+  onReorderTasks,
   getAvailableTargets,
 }: {
   rows: GanttRow<OperatorTask>[];
@@ -304,8 +313,14 @@ function OperatorGanttSection({
   allOperatorLabels: string[];
   onSwapOperators: (opA: string, opB: string) => void;
   onMoveTask: (taskId: string, fromOp: string, toOp: string) => void;
+  onReorderTasks: (taskId: string, fromOp: string, toOp: string, insertIndex: number) => void;
   getAvailableTargets: (taskId: string, fromOp: string) => string[];
 }) {
+  const [dragging, setDragging] = useState<DragState | null>(null);
+  const [hoverOp, setHoverOp] = useState<string | null>(null);
+  const [insertIdx, setInsertIdx] = useState<number>(-1);
+  const [flashId, setFlashId] = useState<string | null>(null);
+
   if (rows.length === 0) {
     return (
       <p className="py-4 text-center text-sm text-muted-foreground">Sem operadores presentes na Escala para este dia.</p>
@@ -318,12 +333,80 @@ function OperatorGanttSection({
   const totalSpan = axisEnd - OPERATOR_START;
   const chartWidth = Math.max(760, totalSpan * pixelsPerMinute);
   const toPercent = (minutes: number) => ((minutes - OPERATOR_START) / totalSpan) * 100;
-  // Grid markers on 30-min intervals aligned to clock, starting from first >= OPERATOR_START
-  const firstMarker = Math.ceil(OPERATOR_START / 30) * 30; // 450 = 07:30
+  const firstMarker = Math.ceil(OPERATOR_START / 30) * 30;
   const markers = [OPERATOR_START, ...Array.from({ length: Math.floor((axisEnd - firstMarker) / 30) + 1 }, (_, i) => firstMarker + i * 30)];
   const totalHeight = rows.length * rowHeight;
   const hardStopLeft = toPercent(OPERATOR_HARD_STOP);
   const secondaryStopLeft = toPercent(MACHINE_TARGET_STOP);
+
+  const handleDragStart = (e: React.DragEvent, taskId: string, fromOp: string) => {
+    if (!editMode) return;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", taskId);
+    setDragging({ taskId, fromOp });
+    if (isDev) console.log("[DnD] dragstart", { taskId, fromOp });
+  };
+
+  const handleDragEnd = () => {
+    setDragging(null);
+    setHoverOp(null);
+    setInsertIdx(-1);
+  };
+
+  const computeInsertIndex = (e: React.DragEvent, rowEl: HTMLElement, opLabel: string): number => {
+    const row = rows.find((r) => r.label === opLabel);
+    if (!row) return 0;
+    const rect = rowEl.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    // Sort tasks by start (visual order)
+    const sorted = [...row.tasks].sort((a, b) => a.start - b.start);
+    for (let i = 0; i < sorted.length; i++) {
+      const t = sorted[i];
+      const leftPct = ((t.start - OPERATOR_START) / totalSpan);
+      const leftPx = leftPct * chartWidth;
+      const widthPx = ((t.end - t.start) / totalSpan) * chartWidth;
+      const midPx = leftPx + widthPx / 2;
+      if (x < midPx) return i;
+    }
+    return sorted.length;
+  };
+
+  const handleRowDragOver = (e: React.DragEvent, opLabel: string, rowEl: HTMLElement | null) => {
+    if (!editMode || !dragging || !rowEl) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const idx = computeInsertIndex(e, rowEl, opLabel);
+    if (hoverOp !== opLabel) setHoverOp(opLabel);
+    if (insertIdx !== idx) setInsertIdx(idx);
+  };
+
+  const handleRowDrop = (e: React.DragEvent, opLabel: string, rowEl: HTMLElement | null) => {
+    if (!editMode || !dragging || !rowEl) return;
+    e.preventDefault();
+    const idx = computeInsertIndex(e, rowEl, opLabel);
+    const taskId = dragging.taskId;
+    const fromOp = dragging.fromOp;
+    if (isDev) console.log("[DnD] drop", { taskId, fromOp, toOp: opLabel, idx });
+    onReorderTasks(taskId, fromOp, opLabel, idx);
+    setFlashId(taskId);
+    window.setTimeout(() => setFlashId((cur) => (cur === taskId ? null : cur)), 400);
+    handleDragEnd();
+  };
+
+  // Compute X position of insertion line for a given row
+  const insertionLineLeft = (opLabel: string): number | null => {
+    if (hoverOp !== opLabel || insertIdx < 0) return null;
+    const row = rows.find((r) => r.label === opLabel);
+    if (!row) return null;
+    const sorted = [...row.tasks].sort((a, b) => a.start - b.start);
+    if (sorted.length === 0) return 0;
+    if (insertIdx >= sorted.length) {
+      const last = sorted[sorted.length - 1];
+      return ((last.end - OPERATOR_START) / totalSpan) * chartWidth;
+    }
+    const t = sorted[insertIdx];
+    return ((t.start - OPERATOR_START) / totalSpan) * chartWidth;
+  };
 
   return (
     <div className="overflow-x-auto">
@@ -346,6 +429,9 @@ function OperatorGanttSection({
             const lunchLeft = rowLunch ? toPercent(rowLunch.start) : 0;
             const lunchWidth = rowLunch ? ((rowLunch.end - rowLunch.start) / totalSpan) * 100 : 0;
             const isOverridden = overriddenOperators.has(row.label);
+            const isDropTarget = editMode && dragging !== null;
+            const isHovered = hoverOp === row.label;
+            const lineLeft = insertionLineLeft(row.label);
 
             return (
               <div key={row.label} className="relative flex items-center" style={{ height: rowHeight }}>
@@ -367,11 +453,37 @@ function OperatorGanttSection({
                     </Tooltip>
                   )}
                 </div>
-                <div className="relative h-full flex-1 border-b border-border/30 bg-muted/5" style={{ width: chartWidth }}>
+                <div
+                  className={`relative h-full flex-1 border-b bg-muted/5 transition-colors ${
+                    isDropTarget
+                      ? isHovered
+                        ? "border-2 border-dashed border-[#FFD966] bg-[#FFD966]/10"
+                        : "border-2 border-dashed border-border/60"
+                      : "border-border/30"
+                  }`}
+                  style={{ width: chartWidth }}
+                  onDragOver={(e) => handleRowDragOver(e, row.label, e.currentTarget)}
+                  onDragLeave={(e) => {
+                    // only clear if leaving the row (not entering a child)
+                    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                    if (hoverOp === row.label) {
+                      setHoverOp(null);
+                      setInsertIdx(-1);
+                    }
+                  }}
+                  onDrop={(e) => handleRowDrop(e, row.label, e.currentTarget)}
+                >
                   {rowLunch && (
                     <div className="absolute top-0 z-[1] rounded bg-muted/60" style={{ left: `${lunchLeft}%`, width: `${lunchWidth}%`, height: rowHeight }} />
                   )}
-                  {row.tasks.length === 0 && (
+                  {/* Insertion indicator */}
+                  {lineLeft !== null && (
+                    <div
+                      className="absolute top-0 z-[20] pointer-events-none"
+                      style={{ left: lineLeft, width: 2, height: rowHeight, backgroundColor: "#FFD966", boxShadow: "0 0 4px #FFD966" }}
+                    />
+                  )}
+                  {row.tasks.length === 0 && !isDropTarget && (
                     <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground italic">
                       Sem tarefas atribuídas
                     </div>
@@ -385,18 +497,28 @@ function OperatorGanttSection({
                       const showTime = widthPx > 60;
                       const isOverflow = seg.overflow;
                       const isConflict = conflictTaskIds.has(task.id);
+                      const isBeingDragged = dragging?.taskId === task.id;
+                      const isFlashing = flashId === task.id;
+                      const exceedsHardStop = task.end > OPERATOR_HARD_STOP;
                       const labelPrefix = isOverflow ? "⚠ " : task.showSimultaneousBadge ? "⊗ " : "";
 
                       const blockEl = (
                         <div
                           key={`${task.id}-${si}`}
-                          className={`absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-0.5 text-[10px] font-semibold text-foreground shadow-sm z-10 ${
+                          draggable={editMode && si === 0}
+                          onDragStart={(e) => si === 0 && handleDragStart(e, task.id, row.label)}
+                          onDragEnd={handleDragEnd}
+                          className={`absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-0.5 text-[10px] font-semibold text-foreground shadow-sm z-10 transition-opacity ${
                             isConflict
                               ? "border-2 border-destructive ring-1 ring-destructive/30"
+                              : exceedsHardStop && editMode
+                              ? "border-2 border-dashed border-red-500"
                               : isOverflow
                               ? "border-dashed border-red-500 bg-red-100/60 dark:bg-red-900/30"
                               : ""
-                          } ${editMode ? "cursor-pointer hover:ring-2 hover:ring-primary/40" : ""}`}
+                          } ${editMode ? (isBeingDragged ? "cursor-grabbing opacity-50" : "cursor-grab hover:ring-2 hover:ring-primary/40") : ""} ${
+                            isFlashing ? "ring-4 ring-[#FFD966] animate-pulse" : ""
+                          }`}
                           style={{
                             left: `${left}%`,
                             width: `${width}%`,
@@ -404,28 +526,33 @@ function OperatorGanttSection({
                               ? { backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(239,68,68,0.15) 4px, rgba(239,68,68,0.15) 8px)' }
                               : {
                                   backgroundColor: colorFill(task.colorIndex, false),
-                                  borderColor: isConflict ? undefined : colorBorder(task.colorIndex, false),
+                                  borderColor: isConflict || (exceedsHardStop && editMode) ? undefined : colorBorder(task.colorIndex, false),
                                 }),
                           }}
-                          title={isConflict ? `⚠ Conflito de horário — ${task.artigo} ${formatClock(task.start)}–${formatClock(task.end)}` : `${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`}
+                          title={
+                            exceedsHardStop && editMode
+                              ? "Esta tarefa ultrapassa o limite operacional das 15:30"
+                              : isConflict
+                              ? `⚠ Conflito de horário — ${task.artigo} ${formatClock(task.start)}–${formatClock(task.end)}`
+                              : `${task.doseLabel} ${formatClock(task.start)}–${formatClock(task.end)}`
+                          }
                         >
                           {showLabel && <span className="truncate leading-tight">{labelPrefix}{task.artigo}</span>}
                           {showTime && <span className="truncate text-[9px] font-medium leading-tight text-foreground/75">{formatClock(seg.start)}–{formatClock(seg.end)}</span>}
                         </div>
                       );
 
-                      if (editMode && si === 0) {
-                        const targets = getAvailableTargets(task.id, row.label);
+                      // Dashed placeholder where the dragged block originally sits
+                      if (isBeingDragged && si === 0) {
                         return (
-                          <TaskBlockPopover
-                            key={`${task.id}-${si}`}
-                            task={task}
-                            operatorLabel={row.label}
-                            availableTargets={targets}
-                            onMove={(toOp) => onMoveTask(task.id, row.label, toOp)}
-                          >
+                          <>
                             {blockEl}
-                          </TaskBlockPopover>
+                            <div
+                              key={`placeholder-${task.id}`}
+                              className="absolute top-1 h-[34px] rounded-md border-2 border-dashed border-muted-foreground/40 z-[5] pointer-events-none"
+                              style={{ left: `${left}%`, width: `${width}%` }}
+                            />
+                          </>
                         );
                       }
 
