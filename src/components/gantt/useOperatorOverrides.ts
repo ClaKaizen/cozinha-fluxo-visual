@@ -1,5 +1,49 @@
 import { useState, useMemo, useCallback } from "react";
-import type { DailyGanttSchedule, GanttRow, OperatorTask } from "./scheduler";
+import type {
+  DailyGanttSchedule,
+  GanttRow,
+  OperatorLunchBreak,
+  OperatorTask,
+  TimelineSegment,
+} from "./scheduler";
+import { OPERATOR_HARD_STOP, formatClock } from "./scheduler";
+
+const isDev = import.meta.env?.DEV ?? false;
+
+// ── Segment rebuild (mirrors scheduler.buildOperatorSegments) ─
+function rebuildOperatorSegments(
+  start: number,
+  duration: number,
+  lunchStart: number,
+  lunchEnd: number,
+): { start: number; end: number; segments: TimelineSegment[] } {
+  const segments: TimelineSegment[] = [];
+  let cursor = start;
+  let remaining = duration;
+
+  if (duration <= 0) {
+    return { start, end: start, segments: [{ start, end: start, overflow: false }] };
+  }
+
+  while (remaining > 0) {
+    if (cursor >= lunchStart && cursor < lunchEnd) {
+      cursor = lunchEnd;
+    }
+    let nextBoundary = cursor + remaining;
+    if (cursor < lunchStart && nextBoundary > lunchStart) {
+      nextBoundary = lunchStart;
+    }
+    const isOverflow = cursor >= OPERATOR_HARD_STOP;
+    const segEnd = isOverflow ? cursor + remaining : nextBoundary;
+    segments.push({ start: cursor, end: segEnd, overflow: isOverflow });
+    if (isOverflow) break;
+    remaining -= nextBoundary - cursor;
+    cursor = nextBoundary;
+  }
+
+  const end = segments.length > 0 ? segments[segments.length - 1].end : start;
+  return { start, end, segments };
+}
 
 // ── Types ────────────────────────────────────────────────
 
