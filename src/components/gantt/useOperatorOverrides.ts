@@ -203,8 +203,8 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   const activeOverrides = editMode ? draftOverrides : savedOverrides;
 
   const effectiveRows = useMemo(
-    () => applyOverrides(schedule.operatorRows, activeOverrides),
-    [schedule.operatorRows, activeOverrides],
+    () => applyOverrides(schedule.operatorRows, activeOverrides, schedule.operatorLunchBreaks),
+    [schedule.operatorRows, activeOverrides, schedule.operatorLunchBreaks],
   );
 
   const conflicts = useMemo(() => detectConflicts(effectiveRows), [effectiveRows]);
@@ -255,7 +255,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   const swapOperators = useCallback(
     (opA: string, opB: string) => {
       // Get current effective assignment
-      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides);
+      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides, schedule.operatorLunchBreaks);
       const rowA = currentRows.find((r) => r.label === opA);
       const rowB = currentRows.find((r) => r.label === opB);
       if (!rowA || !rowB) return;
