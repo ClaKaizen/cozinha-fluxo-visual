@@ -745,6 +745,7 @@ export default function GanttChart({ schedule }: GanttChartProps) {
             allOperatorLabels={allOperatorLabels}
             onSwapOperators={overrides.swapOperators}
             onMoveTask={overrides.moveTask}
+            onReorderTasks={overrides.reorderTasks}
             getAvailableTargets={overrides.getAvailableTargets}
           />
         </CardContent>
