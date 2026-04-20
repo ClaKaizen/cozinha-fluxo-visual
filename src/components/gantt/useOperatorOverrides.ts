@@ -1,5 +1,49 @@
 import { useState, useMemo, useCallback } from "react";
-import type { DailyGanttSchedule, GanttRow, OperatorTask } from "./scheduler";
+import type {
+  DailyGanttSchedule,
+  GanttRow,
+  OperatorLunchBreak,
+  OperatorTask,
+  TimelineSegment,
+} from "./scheduler";
+import { OPERATOR_HARD_STOP, formatClock } from "./scheduler";
+
+const isDev = import.meta.env?.DEV ?? false;
+
+// ── Segment rebuild (mirrors scheduler.buildOperatorSegments) ─
+function rebuildOperatorSegments(
+  start: number,
+  duration: number,
+  lunchStart: number,
+  lunchEnd: number,
+): { start: number; end: number; segments: TimelineSegment[] } {
+  const segments: TimelineSegment[] = [];
+  let cursor = start;
+  let remaining = duration;
+
+  if (duration <= 0) {
+    return { start, end: start, segments: [{ start, end: start, overflow: false }] };
+  }
+
+  while (remaining > 0) {
+    if (cursor >= lunchStart && cursor < lunchEnd) {
+      cursor = lunchEnd;
+    }
+    let nextBoundary = cursor + remaining;
+    if (cursor < lunchStart && nextBoundary > lunchStart) {
+      nextBoundary = lunchStart;
+    }
+    const isOverflow = cursor >= OPERATOR_HARD_STOP;
+    const segEnd = isOverflow ? cursor + remaining : nextBoundary;
+    segments.push({ start: cursor, end: segEnd, overflow: isOverflow });
+    if (isOverflow) break;
+    remaining -= nextBoundary - cursor;
+    cursor = nextBoundary;
+  }
+
+  const end = segments.length > 0 ? segments[segments.length - 1].end : start;
+  return { start, end, segments };
+}
 
 // ── Types ────────────────────────────────────────────────
 
@@ -36,8 +80,15 @@ function detectConflicts(rows: GanttRow<OperatorTask>[]): OperatorConflict[] {
 export function applyOverrides(
   originalRows: GanttRow<OperatorTask>[],
   overrides: ManualOverride,
+  operatorLunchBreaks: Record<string, OperatorLunchBreak> = {},
 ): GanttRow<OperatorTask>[] {
-  if (Object.keys(overrides).length === 0) return originalRows;
+  // Anchor = start of first task in original row (before override)
+  const anchorByRow = new Map<string, number>();
+  for (const row of originalRows) {
+    if (row.tasks.length > 0) {
+      anchorByRow.set(row.label, row.tasks[0].start);
+    }
+  }
 
   // Build a flat pool of all tasks
   const allTasks = new Map<string, OperatorTask>();
@@ -49,28 +100,78 @@ export function applyOverrides(
 
   // Build assignment map: taskId → operatorLabel from overrides
   const taskToOperator = new Map<string, string>();
+  // Also preserve order from override arrays
+  const orderInTarget = new Map<string, number>();
   for (const [opLabel, taskIds] of Object.entries(overrides)) {
-    for (const tid of taskIds) {
+    taskIds.forEach((tid, idx) => {
       taskToOperator.set(tid, opLabel);
-    }
+      orderInTarget.set(tid, idx);
+    });
   }
 
   // For tasks NOT in any override, keep original assignment
   for (const row of originalRows) {
-    for (const task of row.tasks) {
+    row.tasks.forEach((task, idx) => {
       if (!taskToOperator.has(task.id)) {
         taskToOperator.set(task.id, row.label);
+        orderInTarget.set(task.id, idx + 1_000_000); // append after explicit overrides
       }
-    }
+    });
   }
+
+  const hasOverrides = Object.keys(overrides).length > 0;
 
   // Rebuild rows
   return originalRows.map((row) => {
-    const tasks = Array.from(allTasks.values())
-      .filter((t) => taskToOperator.get(t.id) === row.label)
-      .map((t) => ({ ...t, operatorName: row.label }))
-      .sort((a, b) => a.start - b.start);
-    return { ...row, tasks };
+    const assignedTasks = Array.from(allTasks.values()).filter(
+      (t) => taskToOperator.get(t.id) === row.label,
+    );
+
+    if (!hasOverrides) {
+      // No overrides → return original ordering & timing untouched
+      return {
+        ...row,
+        tasks: assignedTasks
+          .map((t) => ({ ...t, operatorName: row.label }))
+          .sort((a, b) => a.start - b.start),
+      };
+    }
+
+    // Sort by override-defined order
+    assignedTasks.sort((a, b) => {
+      const oa = orderInTarget.get(a.id) ?? 0;
+      const ob = orderInTarget.get(b.id) ?? 0;
+      return oa - ob;
+    });
+
+    // Recalculate start/end/segments sequentially from anchor
+    const lunch = operatorLunchBreaks[row.label];
+    const lunchStart = lunch?.start ?? Number.POSITIVE_INFINITY;
+    const lunchEnd = lunch?.end ?? Number.POSITIVE_INFINITY;
+    const anchor = anchorByRow.get(row.label) ?? (assignedTasks[0]?.start ?? 0);
+
+    let cursor = anchor;
+    const recalculated: OperatorTask[] = assignedTasks.map((t) => {
+      const dur = t.operatorDuration ?? 0;
+      const built = rebuildOperatorSegments(cursor, dur, lunchStart, lunchEnd);
+      cursor = built.end;
+      return {
+        ...t,
+        operatorName: row.label,
+        start: built.start,
+        end: built.end,
+        segments: built.segments,
+      };
+    });
+
+    if (isDev && recalculated.some((t) => t.end > OPERATOR_HARD_STOP)) {
+      const overflows = recalculated
+        .filter((t) => t.end > OPERATOR_HARD_STOP)
+        .map((t) => `${t.doseLabel} → ${formatClock(t.end)}`);
+      console.warn(`[Override] ${row.label}: tarefas após 15:30 →`, overflows);
+    }
+
+    return { ...row, tasks: recalculated };
   });
 }
 
@@ -102,8 +203,8 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   const activeOverrides = editMode ? draftOverrides : savedOverrides;
 
   const effectiveRows = useMemo(
-    () => applyOverrides(schedule.operatorRows, activeOverrides),
-    [schedule.operatorRows, activeOverrides],
+    () => applyOverrides(schedule.operatorRows, activeOverrides, schedule.operatorLunchBreaks),
+    [schedule.operatorRows, activeOverrides, schedule.operatorLunchBreaks],
   );
 
   const conflicts = useMemo(() => detectConflicts(effectiveRows), [effectiveRows]);
@@ -154,7 +255,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   const swapOperators = useCallback(
     (opA: string, opB: string) => {
       // Get current effective assignment
-      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides);
+      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides, schedule.operatorLunchBreaks);
       const rowA = currentRows.find((r) => r.label === opA);
       const rowB = currentRows.find((r) => r.label === opB);
       if (!rowA || !rowB) return;
@@ -171,7 +272,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   // Move a single task to a different operator
   const moveTask = useCallback(
     (taskId: string, fromOp: string, toOp: string, insertAtIndex?: number) => {
-      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides);
+      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides, schedule.operatorLunchBreaks);
 
       // Build new overrides ensuring all task assignments are captured
       const newOverrides: ManualOverride = {};
@@ -197,7 +298,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   // Get available targets for a single task move (no conflict)
   const getAvailableTargets = useCallback(
     (taskId: string, fromOp: string): string[] => {
-      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides);
+      const currentRows = applyOverrides(schedule.operatorRows, draftOverrides, schedule.operatorLunchBreaks);
       const task = currentRows
         .flatMap((r) => r.tasks)
         .find((t) => t.id === taskId);

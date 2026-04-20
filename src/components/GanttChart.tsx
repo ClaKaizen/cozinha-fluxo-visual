@@ -382,17 +382,30 @@ function OperatorGanttSection({
                       ? (e) => {
                           e.preventDefault();
                           if (!dragState) return;
-                          const blocks = Array.from(
-                            e.currentTarget.querySelectorAll('[data-task-block]'),
+                          // Build [taskIndex, centerX] pairs for blocks present in DOM
+                          const blockEls = Array.from(
+                            e.currentTarget.querySelectorAll<HTMLElement>('[data-task-block]'),
                           );
-                          let insertionIndex = row.tasks.length;
-                          for (let i = 0; i < blocks.length; i++) {
-                            const blockRect = blocks[i].getBoundingClientRect();
-                            if (e.clientX < blockRect.left + blockRect.width / 2) {
-                              insertionIndex = i;
-                              break;
-                            }
+                          const taskIdToIndex = new Map<string, number>();
+                          row.tasks.forEach((t, i) => taskIdToIndex.set(t.id, i));
+                          const centers: { taskIndex: number; centerX: number }[] = [];
+                          for (const el of blockEls) {
+                            const tid = el.getAttribute('data-task-id');
+                            if (!tid) continue;
+                            const idx = taskIdToIndex.get(tid);
+                            if (idx === undefined) continue;
+                            const r = el.getBoundingClientRect();
+                            centers.push({ taskIndex: idx, centerX: r.left + r.width / 2 });
                           }
+                          // Sort by task sequence order, not DOM order
+                          centers.sort((a, b) => a.taskIndex - b.taskIndex);
+                          let insertionIndex = 0;
+                          for (const c of centers) {
+                            if (c.centerX < e.clientX) insertionIndex++;
+                            else break;
+                          }
+                          // Clamp
+                          insertionIndex = Math.min(insertionIndex, row.tasks.length);
                           setDropTarget((prev) =>
                             prev?.opLabel === row.label && prev.insertionIndex === insertionIndex
                               ? prev
@@ -443,7 +456,7 @@ function OperatorGanttSection({
                       const blockEl = (
                         <div
                           key={`${task.id}-${si}`}
-                          {...(isFirstSeg ? { 'data-task-block': 'true' } : {})}
+                          {...(isFirstSeg ? { 'data-task-block': 'true', 'data-task-id': task.id } : {})}
                           draggable={editMode && isFirstSeg}
                           onDragStart={
                             editMode && isFirstSeg
