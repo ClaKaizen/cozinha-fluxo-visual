@@ -164,17 +164,24 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   const [savedOverrides, setSavedOverrides] = useState<ManualOverride>({});
   const [draftReorder, setDraftReorder] = useState<Record<string, string[]>>({});
   const [savedReorder, setSavedReorder] = useState<Record<string, string[]>>({});
+  // Snapshot of original first-task start per operator at the moment edit
+  // mode was entered. This is the immutable anchor used by recomputation.
+  const [editAnchors, setEditAnchors] = useState<Record<string, number> | null>(null);
 
-  const anchors = useMemo(() => {
+  const baseAnchors = useMemo(() => {
     const map: Record<string, number> = {};
     for (const row of schedule.operatorRows) {
       if (row.tasks.length > 0) {
         const first = [...row.tasks].sort((a, b) => a.start - b.start)[0];
         map[row.label] = first.start;
+      } else {
+        map[row.label] = OPERATOR_START;
       }
     }
     return map;
   }, [schedule.operatorRows]);
+
+  const anchors = editMode && editAnchors ? editAnchors : baseAnchors;
 
   const activeOverrides = editMode ? draftOverrides : savedOverrides;
   const activeReorder = editMode ? draftReorder : savedReorder;
