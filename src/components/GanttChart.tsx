@@ -456,7 +456,7 @@ function OperatorGanttSection({
                       const blockEl = (
                         <div
                           key={`${task.id}-${si}`}
-                          {...(isFirstSeg ? { 'data-task-block': 'true' } : {})}
+                          {...(isFirstSeg ? { 'data-task-block': 'true', 'data-task-id': task.id } : {})}
                           draggable={editMode && isFirstSeg}
                           onDragStart={
                             editMode && isFirstSeg
