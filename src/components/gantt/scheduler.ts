@@ -873,20 +873,24 @@ function jointSchedule(
   }
 
   /** Register or update commitment when an operator is assigned a task.
-   *  Only creates commitments for non-multiOperador equipment. */
+   *  PER-OPERATOR GROUPING: each operator must finish all remaining batches of the
+   *  artigo they just started (assigned to them) before switching to a different
+   *  artigo. Multiple operators can still work the same artigo in parallel. */
   function registerCommitment(opName: string, task: PlanningTask, pendingTasks: PlanningTask[]) {
-    const eq = equipmentMap.get(task.equipmentId);
-    const isMulti = eq?.multiOperador ?? true;
-    // Only commit for non-multiOperador equipment (task continuity on Fritadeira etc.)
-    if (!isMulti) {
-      const remaining = pendingTasks.filter(t => t.artigo === task.artigo).length;
-      if (remaining > 0) {
-        operatorCommitments.set(opName, { artigo: task.artigo, equipmentId: task.equipmentId, remaining });
-      } else {
-        operatorCommitments.delete(opName);
-      }
+    // Count remaining batches of this artigo+equipment in the pending pool that
+    // could still be picked by this operator.
+    const remaining = pendingTasks.filter(
+      (t) => t.artigo === task.artigo && t.equipmentId === task.equipmentId,
+    ).length;
+    if (remaining > 0) {
+      operatorCommitments.set(opName, {
+        artigo: task.artigo,
+        equipmentId: task.equipmentId,
+        remaining,
+      });
+    } else {
+      operatorCommitments.delete(opName);
     }
-    // For multiOperador equipment, no commitment — load balancing distributes freely
   }
 
   function tryScheduleAll(allowEmergency: boolean, tasksToSchedule: PlanningTask[]): PlanningTask[] {
@@ -2248,4 +2252,137 @@ export function buildDailyGanttSchedule({
     lunchStart,
     lunchEnd,
   };
+}
+
+// ── Shared equipment availability timeline ──────────────
+//
+// A pure utility used by BOTH the initial scheduler and the post-drag
+// recalculation. Tracks N independent release timestamps per equipment
+// type — one per physical unit (including any emergency units). Always
+// assigns the unit with the earliest release time among all units of
+// the requested equipment type.
+//
+// Usage:
+//   const timeline = createEquipmentTimeline(equipment);
+//   const { start, end, unitIdx } = timeline.assign(equipmentId, machineDuration, opFreeTime);
+
+export interface EquipmentTimeline {
+  /** Earliest available time across all units of an equipment type. */
+  earliestRelease(equipmentId: string): number;
+  /**
+   * Compute the earliest start time for a task of the given equipment,
+   * not earlier than `notBefore`, AND assign the chosen unit. Updates the
+   * unit's release time to start + machineDuration.
+   */
+  assign(
+    equipmentId: string,
+    machineDuration: number,
+    notBefore: number,
+  ): { start: number; end: number; unitIdx: number };
+  /** Pre-seed a unit's release time (e.g. from already-scheduled tasks). */
+  seed(equipmentId: string, unitIdx: number, releaseTime: number): void;
+  /** Return current release timestamps for an equipment id (for inspection). */
+  snapshot(equipmentId: string): number[];
+}
+
+/**
+ * Build a timeline initialised with unit counts taken from the `equipment`
+ * list. By default every unit starts free at DAY_START. Emergency units are
+ * included so the timeline matches the same physical capacity available to
+ * the scheduler when emergency equipment is in use.
+ */
+export function createEquipmentTimeline(equipment: Equipment[]): EquipmentTimeline {
+  const slots = new Map<string, number[]>();
+  for (const eq of equipment) {
+    const total = eq.quantidade + eq.quantidadeEmergencia;
+    slots.set(eq.id, Array.from({ length: total }, () => DAY_START));
+  }
+  return buildTimeline(slots);
+}
+
+/**
+ * Build a timeline whose unit counts and initial release times come from a
+ * snapshot of machine rows (label like "<eq> N" or "<eq> N ⚠️"). Each row
+ * contributes one physical unit. Tasks listed in `excludeTaskIds` are NOT
+ * counted when computing release times — useful for the post-drag
+ * recalculation, where the operator-row tasks are about to be re-placed.
+ */
+export function createEquipmentTimelineFromMachineRows(
+  machineRows: GanttRow<MachineTask>[],
+  equipment: Equipment[],
+  excludeTaskIds: Set<string>,
+): EquipmentTimeline {
+  const slots = new Map<string, number[]>();
+  // Pre-allocate per equipment id using configured capacity (incl. emergency).
+  for (const eq of equipment) {
+    const total = eq.quantidade + eq.quantidadeEmergencia;
+    slots.set(eq.id, Array.from({ length: total }, () => DAY_START));
+  }
+  // Seed release times from non-excluded tasks already on each machine row.
+  for (const row of machineRows) {
+    for (const t of row.tasks) {
+      if (excludeTaskIds.has(t.id)) continue;
+      const arr = slots.get(t.equipmentId);
+      if (!arr) continue;
+      const idx = t.machineIndex;
+      if (idx < 0 || idx >= arr.length) continue;
+      if (t.end > arr[idx]) arr[idx] = t.end;
+    }
+  }
+  return buildTimeline(slots);
+}
+
+function buildTimeline(slots: Map<string, number[]>): EquipmentTimeline {
+  function pickEarliest(arr: number[]): number {
+    let bestIdx = 0;
+    for (let i = 1; i < arr.length; i++) {
+      if (arr[i] < arr[bestIdx]) bestIdx = i;
+    }
+    return bestIdx;
+  }
+  return {
+    earliestRelease(equipmentId) {
+      const arr = slots.get(equipmentId);
+      if (!arr || arr.length === 0) return DAY_START;
+      return Math.min(...arr);
+    },
+    assign(equipmentId, machineDuration, notBefore) {
+      const arr = slots.get(equipmentId);
+      if (!arr || arr.length === 0) {
+        // Unknown equipment — fall back to notBefore (no contention tracked).
+        return { start: notBefore, end: notBefore + machineDuration, unitIdx: 0 };
+      }
+      const idx = pickEarliest(arr);
+      const start = Math.max(arr[idx], notBefore);
+      const end = start + machineDuration;
+      arr[idx] = end;
+      return { start, end, unitIdx: idx };
+    },
+    seed(equipmentId, unitIdx, releaseTime) {
+      const arr = slots.get(equipmentId);
+      if (!arr) return;
+      if (unitIdx < 0 || unitIdx >= arr.length) return;
+      if (releaseTime > arr[unitIdx]) arr[unitIdx] = releaseTime;
+    },
+    snapshot(equipmentId) {
+      const arr = slots.get(equipmentId);
+      return arr ? [...arr] : [];
+    },
+  };
+}
+
+/**
+ * Pure helper: given an operator's free time, an equipment id, and a shared
+ * equipment timeline, return the earliest task start that respects BOTH the
+ * operator's availability AND machine-unit contention — and reserve the
+ * chosen unit. This is the function that the scheduler conceptually uses
+ * for each placement; the post-drag recalculation uses it directly.
+ */
+export function calculateTaskStart(
+  operatorFreeTime: number,
+  equipmentId: string,
+  machineDuration: number,
+  timeline: EquipmentTimeline,
+): { start: number; end: number; unitIdx: number } {
+  return timeline.assign(equipmentId, machineDuration, operatorFreeTime);
 }
