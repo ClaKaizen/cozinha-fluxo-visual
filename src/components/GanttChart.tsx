@@ -279,14 +279,17 @@ function MachineGanttSection(props: {
   );
 }
 
-// ── Operator Gantt Section (with edit mode + native HTML5 DnD) ─
+// ── Operator Gantt Section (with edit mode + custom DnD) ─
 
 const isDev = typeof import.meta !== "undefined" && (import.meta as any).env?.DEV;
 
 interface DragState {
   taskId: string;
   fromOp: string;
-  /** ID of the task most recently flashed after a drop (for visual confirmation) */
+  blockWidthPx: number;
+  blockHeightPx: number;
+  label: string;
+  timeLabel: string;
 }
 
 function OperatorGanttSection({
@@ -321,11 +324,9 @@ function OperatorGanttSection({
   const [insertIdx, setInsertIdx] = useState<number>(-1);
   const [flashId, setFlashId] = useState<string | null>(null);
 
-  if (rows.length === 0) {
-    return (
-      <p className="py-4 text-center text-sm text-muted-foreground">Sem operadores presentes na Escala para este dia.</p>
-    );
-  }
+  const previewRef = useRef<HTMLDivElement | null>(null);
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const draggingRef = useRef<DragState | null>(null);
 
   const labelWidth = 148;
   const rowHeight = 42;
@@ -339,31 +340,27 @@ function OperatorGanttSection({
   const hardStopLeft = toPercent(OPERATOR_HARD_STOP);
   const secondaryStopLeft = toPercent(MACHINE_TARGET_STOP);
 
-  const handleDragStart = (e: React.DragEvent, taskId: string, fromOp: string) => {
-    if (!editMode) return;
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", taskId);
-    setDragging({ taskId, fromOp });
-    if (isDev) console.log("[DnD] dragstart", { taskId, fromOp });
-  };
-
-  const handleDragEnd = () => {
+  // Single source of truth: reset every piece of drag state
+  const resetDragState = () => {
+    draggingRef.current = null;
     setDragging(null);
     setHoverOp(null);
     setInsertIdx(-1);
+    if (previewRef.current && previewRef.current.parentNode) {
+      previewRef.current.parentNode.removeChild(previewRef.current);
+    }
+    previewRef.current = null;
   };
 
-  const computeInsertIndex = (e: React.DragEvent, rowEl: HTMLElement, opLabel: string): number => {
+  const computeInsertIndexAtX = (rowEl: HTMLElement, opLabel: string, clientX: number): number => {
     const row = rows.find((r) => r.label === opLabel);
     if (!row) return 0;
     const rect = rowEl.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    // Sort tasks by start (visual order)
+    const x = clientX - rect.left;
     const sorted = [...row.tasks].sort((a, b) => a.start - b.start);
     for (let i = 0; i < sorted.length; i++) {
       const t = sorted[i];
-      const leftPct = ((t.start - OPERATOR_START) / totalSpan);
-      const leftPx = leftPct * chartWidth;
+      const leftPx = ((t.start - OPERATOR_START) / totalSpan) * chartWidth;
       const widthPx = ((t.end - t.start) / totalSpan) * chartWidth;
       const midPx = leftPx + widthPx / 2;
       if (x < midPx) return i;
@@ -371,27 +368,150 @@ function OperatorGanttSection({
     return sorted.length;
   };
 
-  const handleRowDragOver = (e: React.DragEvent, opLabel: string, rowEl: HTMLElement | null) => {
-    if (!editMode || !dragging || !rowEl) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    const idx = computeInsertIndex(e, rowEl, opLabel);
-    if (hoverOp !== opLabel) setHoverOp(opLabel);
-    if (insertIdx !== idx) setInsertIdx(idx);
+  // Document-level pointermove: update floating preview + detect row + insertion idx
+  useEffect(() => {
+    if (!dragging) return;
+
+    const handleMove = (ev: PointerEvent) => {
+      // Move preview
+      if (previewRef.current) {
+        previewRef.current.style.transform = `translate(${ev.clientX - dragging.blockWidthPx / 2}px, ${ev.clientY - dragging.blockHeightPx / 2}px) scale(1.05)`;
+      }
+      // Find which row the cursor is over
+      let foundOp: string | null = null;
+      let foundEl: HTMLElement | null = null;
+      for (const [label, el] of Object.entries(rowRefs.current)) {
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
+          foundOp = label;
+          foundEl = el;
+          break;
+        }
+      }
+      if (foundOp && foundEl) {
+        const idx = computeInsertIndexAtX(foundEl, foundOp, ev.clientX);
+        setHoverOp((cur) => (cur === foundOp ? cur : foundOp));
+        setInsertIdx((cur) => (cur === idx ? cur : idx));
+      } else {
+        setHoverOp((cur) => (cur === null ? cur : null));
+        setInsertIdx((cur) => (cur === -1 ? cur : -1));
+      }
+    };
+
+    const handleUp = (ev: PointerEvent) => {
+      const cur = draggingRef.current;
+      if (!cur) {
+        resetDragState();
+        return;
+      }
+      // Detect drop row
+      let dropOp: string | null = null;
+      let dropEl: HTMLElement | null = null;
+      for (const [label, el] of Object.entries(rowRefs.current)) {
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
+          dropOp = label;
+          dropEl = el;
+          break;
+        }
+      }
+      if (dropOp && dropEl) {
+        const idx = computeInsertIndexAtX(dropEl, dropOp, ev.clientX);
+        const taskId = cur.taskId;
+        if (isDev) console.log("[DnD] drop", { taskId, fromOp: cur.fromOp, toOp: dropOp, idx });
+        onReorderTasks(taskId, cur.fromOp, dropOp, idx);
+        resetDragState();
+        setFlashId(taskId);
+        window.setTimeout(() => setFlashId((c) => (c === taskId ? null : c)), 400);
+      } else {
+        if (isDev) console.log("[DnD] cancel — dropped outside any row");
+        resetDragState();
+      }
+    };
+
+    const handleKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") resetDragState();
+    };
+
+    document.addEventListener("pointermove", handleMove);
+    document.addEventListener("pointerup", handleUp);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointermove", handleMove);
+      document.removeEventListener("pointerup", handleUp);
+      document.removeEventListener("keydown", handleKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragging]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (previewRef.current && previewRef.current.parentNode) {
+        previewRef.current.parentNode.removeChild(previewRef.current);
+      }
+      previewRef.current = null;
+    };
+  }, []);
+
+  const startDrag = (
+    ev: React.PointerEvent,
+    task: OperatorTask,
+    fromOp: string,
+    blockEl: HTMLElement,
+  ) => {
+    if (!editMode) return;
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    const rect = blockEl.getBoundingClientRect();
+    const state: DragState = {
+      taskId: task.id,
+      fromOp,
+      blockWidthPx: rect.width,
+      blockHeightPx: rect.height,
+      label: task.artigo,
+      timeLabel: `${formatClock(task.start)}–${formatClock(task.end)}`,
+    };
+    draggingRef.current = state;
+
+    // Build floating preview
+    const preview = document.createElement("div");
+    preview.style.position = "fixed";
+    preview.style.left = "0";
+    preview.style.top = "0";
+    preview.style.width = `${rect.width}px`;
+    preview.style.height = `${rect.height}px`;
+    preview.style.pointerEvents = "none";
+    preview.style.zIndex = "9999";
+    preview.style.borderRadius = "6px";
+    preview.style.padding = "2px 6px";
+    preview.style.fontSize = "10px";
+    preview.style.fontWeight = "600";
+    preview.style.color = "#1a2233";
+    preview.style.background = "#FFD966";
+    preview.style.border = "1px solid #b8923f";
+    preview.style.boxShadow = "0 8px 24px rgba(0,0,0,0.18)";
+    preview.style.display = "flex";
+    preview.style.flexDirection = "column";
+    preview.style.justifyContent = "center";
+    preview.style.overflow = "hidden";
+    preview.style.transformOrigin = "center center";
+    preview.style.transform = `translate(${ev.clientX - rect.width / 2}px, ${ev.clientY - rect.height / 2}px) scale(1.05)`;
+    preview.innerHTML = `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${state.label}</span><span style="font-size:9px;font-weight:500;opacity:0.75">${state.timeLabel}</span>`;
+    document.body.appendChild(preview);
+    previewRef.current = preview;
+
+    if (isDev) console.log("[DnD] dragstart", { taskId: task.id, fromOp });
+    setDragging(state);
   };
 
-  const handleRowDrop = (e: React.DragEvent, opLabel: string, rowEl: HTMLElement | null) => {
-    if (!editMode || !dragging || !rowEl) return;
-    e.preventDefault();
-    const idx = computeInsertIndex(e, rowEl, opLabel);
-    const taskId = dragging.taskId;
-    const fromOp = dragging.fromOp;
-    if (isDev) console.log("[DnD] drop", { taskId, fromOp, toOp: opLabel, idx });
-    onReorderTasks(taskId, fromOp, opLabel, idx);
-    setFlashId(taskId);
-    window.setTimeout(() => setFlashId((cur) => (cur === taskId ? null : cur)), 400);
-    handleDragEnd();
-  };
+  if (rows.length === 0) {
+    return (
+      <p className="py-4 text-center text-sm text-muted-foreground">Sem operadores presentes na Escala para este dia.</p>
+    );
+  }
 
   // Compute X position of insertion line for a given row
   const insertionLineLeft = (opLabel: string): number | null => {
@@ -428,10 +548,11 @@ function OperatorGanttSection({
             const rowLunch = rowLunchBreaks?.[row.label];
             const lunchLeft = rowLunch ? toPercent(rowLunch.start) : 0;
             const lunchWidth = rowLunch ? ((rowLunch.end - rowLunch.start) / totalSpan) * 100 : 0;
-            const isOverridden = overriddenOperators.has(row.label);
             const isDropTarget = editMode && dragging !== null;
             const isHovered = hoverOp === row.label;
             const lineLeft = insertionLineLeft(row.label);
+            const sortedTasks = [...row.tasks].sort((a, b) => a.start - b.start);
+            const draggedWidthPct = dragging ? (dragging.blockWidthPx / chartWidth) * 100 : 0;
 
             return (
               <div key={row.label} className="relative flex items-center" style={{ height: rowHeight }}>
@@ -444,52 +565,50 @@ function OperatorGanttSection({
                     />
                   )}
                   <span className="truncate">{row.label}</span>
-                  {isOverridden && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="text-[10px] cursor-help">✏️</span>
-                      </TooltipTrigger>
-                      <TooltipContent className="text-xs">Atribuição editada manualmente — clique em Repor para reverter</TooltipContent>
-                    </Tooltip>
-                  )}
                 </div>
                 <div
-                  className={`relative h-full flex-1 border-b bg-muted/5 transition-colors ${
+                  ref={(el) => { rowRefs.current[row.label] = el; }}
+                  className={`relative h-full flex-1 border-b transition-colors ${
                     isDropTarget
                       ? isHovered
-                        ? "border-2 border-dashed border-[#FFD966] bg-[#FFD966]/10"
+                        ? "border-2 border-dashed"
                         : "border-2 border-dashed border-border/60"
-                      : "border-border/30"
+                      : "border-border/30 bg-muted/5"
                   }`}
-                  style={{ width: chartWidth }}
-                  onDragOver={(e) => handleRowDragOver(e, row.label, e.currentTarget)}
-                  onDragLeave={(e) => {
-                    // only clear if leaving the row (not entering a child)
-                    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-                    if (hoverOp === row.label) {
-                      setHoverOp(null);
-                      setInsertIdx(-1);
-                    }
+                  style={{
+                    width: chartWidth,
+                    ...(isDropTarget && isHovered
+                      ? { borderColor: "#FFD966", backgroundColor: "rgba(255,217,102,0.15)" }
+                      : {}),
                   }}
-                  onDrop={(e) => handleRowDrop(e, row.label, e.currentTarget)}
                 >
                   {rowLunch && (
                     <div className="absolute top-0 z-[1] rounded bg-muted/60" style={{ left: `${lunchLeft}%`, width: `${lunchWidth}%`, height: rowHeight }} />
                   )}
-                  {/* Insertion indicator */}
+                  {/* Insertion indicator: 2px line + circular handles top/bottom */}
                   {lineLeft !== null && (
-                    <div
-                      className="absolute top-0 z-[20] pointer-events-none"
-                      style={{ left: lineLeft, width: 2, height: rowHeight, backgroundColor: "#FFD966", boxShadow: "0 0 4px #FFD966" }}
-                    />
+                    <>
+                      <div
+                        className="absolute top-0 z-[20] pointer-events-none"
+                        style={{ left: lineLeft - 1, width: 2, height: rowHeight, backgroundColor: "#44546A" }}
+                      />
+                      <div
+                        className="absolute z-[21] pointer-events-none rounded-full"
+                        style={{ left: lineLeft - 3, top: 0, width: 6, height: 6, backgroundColor: "#44546A" }}
+                      />
+                      <div
+                        className="absolute z-[21] pointer-events-none rounded-full"
+                        style={{ left: lineLeft - 3, top: rowHeight - 6, width: 6, height: 6, backgroundColor: "#44546A" }}
+                      />
+                    </>
                   )}
                   {row.tasks.length === 0 && !isDropTarget && (
                     <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground italic">
                       Sem tarefas atribuídas
                     </div>
                   )}
-                  {row.tasks.map((task) =>
-                    task.segments.map((seg, si) => {
+                  {sortedTasks.map((task, taskIdx) => {
+                    return task.segments.map((seg, si) => {
                       const left = toPercent(seg.start);
                       const width = ((seg.end - seg.start) / totalSpan) * 100;
                       const widthPx = (width / 100) * chartWidth;
@@ -502,35 +621,53 @@ function OperatorGanttSection({
                       const exceedsHardStop = task.end > OPERATOR_HARD_STOP;
                       const labelPrefix = isOverflow ? "⚠ " : task.showSimultaneousBadge ? "⊗ " : "";
 
+                      // Permutation preview: while dragging over THIS row,
+                      // shift tasks at index >= insertIdx to the right by
+                      // dragged block width to preview landing position.
+                      const shouldShift =
+                        dragging !== null &&
+                        isHovered &&
+                        si === 0 &&
+                        !isBeingDragged &&
+                        insertIdx >= 0 &&
+                        taskIdx >= insertIdx;
+                      const shiftPx = shouldShift ? dragging!.blockWidthPx + 6 : 0;
+
                       const blockEl = (
                         <div
                           key={`${task.id}-${si}`}
-                          draggable={editMode && si === 0}
-                          onDragStart={(e) => si === 0 && handleDragStart(e, task.id, row.label)}
-                          onDragEnd={handleDragEnd}
-                          className={`absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-0.5 text-[10px] font-semibold text-foreground shadow-sm z-10 transition-opacity ${
+                          onPointerDown={(e) => {
+                            if (editMode && si === 0) {
+                              startDrag(e, task, row.label, e.currentTarget);
+                            }
+                          }}
+                          className={`absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-0.5 text-[10px] font-semibold text-foreground shadow-sm z-10 ${
                             isConflict
                               ? "border-2 border-destructive ring-1 ring-destructive/30"
-                              : exceedsHardStop && editMode
+                              : exceedsHardStop
                               ? "border-2 border-dashed border-red-500"
                               : isOverflow
                               ? "border-dashed border-red-500 bg-red-100/60 dark:bg-red-900/30"
                               : ""
-                          } ${editMode ? (isBeingDragged ? "cursor-grabbing opacity-50" : "cursor-grab hover:ring-2 hover:ring-primary/40") : ""} ${
-                            isFlashing ? "ring-4 ring-[#FFD966] animate-pulse" : ""
+                          } ${editMode ? (isBeingDragged ? "cursor-grabbing" : "cursor-grab hover:ring-2 hover:ring-primary/40") : ""} ${
+                            isFlashing ? "ring-4 ring-[#FFD966]" : ""
                           }`}
                           style={{
                             left: `${left}%`,
                             width: `${width}%`,
+                            transform: `translateX(${shiftPx}px)`,
+                            transition: "transform 0.15s ease, opacity 0.2s ease",
+                            opacity: isBeingDragged ? 0 : 1,
+                            touchAction: "none",
                             ...(isOverflow
                               ? { backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(239,68,68,0.15) 4px, rgba(239,68,68,0.15) 8px)' }
                               : {
                                   backgroundColor: colorFill(task.colorIndex, false),
-                                  borderColor: isConflict || (exceedsHardStop && editMode) ? undefined : colorBorder(task.colorIndex, false),
+                                  borderColor: isConflict || exceedsHardStop ? undefined : colorBorder(task.colorIndex, false),
                                 }),
                           }}
                           title={
-                            exceedsHardStop && editMode
+                            exceedsHardStop
                               ? "Esta tarefa ultrapassa o limite operacional das 15:30"
                               : isConflict
                               ? `⚠ Conflito de horário — ${task.artigo} ${formatClock(task.start)}–${formatClock(task.end)}`
@@ -545,20 +682,20 @@ function OperatorGanttSection({
                       // Dashed placeholder where the dragged block originally sits
                       if (isBeingDragged && si === 0) {
                         return (
-                          <>
+                          <div key={`wrap-${task.id}-${si}`} style={{ display: "contents" }}>
                             {blockEl}
                             <div
                               key={`placeholder-${task.id}`}
                               className="absolute top-1 h-[34px] rounded-md border-2 border-dashed border-muted-foreground/40 z-[5] pointer-events-none"
-                              style={{ left: `${left}%`, width: `${width}%` }}
+                              style={{ left: `${left}%`, width: `${width}%`, background: "transparent" }}
                             />
-                          </>
+                          </div>
                         );
                       }
 
                       return blockEl;
-                    })
-                  )}
+                    });
+                  })}
                 </div>
               </div>
             );
