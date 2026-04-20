@@ -303,9 +303,12 @@ function OperatorGanttSection({
   overriddenOperators: Set<string>;
   allOperatorLabels: string[];
   onSwapOperators: (opA: string, opB: string) => void;
-  onMoveTask: (taskId: string, fromOp: string, toOp: string) => void;
+  onMoveTask: (taskId: string, fromOp: string, toOp: string, insertAtIndex?: number) => void;
   getAvailableTargets: (taskId: string, fromOp: string) => string[];
 }) {
+  const [dragState, setDragState] = useState<{ taskId: string; fromOp: string } | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ opLabel: string; insertionIndex: number } | null>(null);
+
   if (rows.length === 0) {
     return (
       <p className="py-4 text-center text-sm text-muted-foreground">Sem operadores presentes na Escala para este dia.</p>
