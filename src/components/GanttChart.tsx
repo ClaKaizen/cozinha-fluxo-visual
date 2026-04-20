@@ -602,7 +602,7 @@ export default function GanttChart({ schedule }: GanttChartProps) {
           </div>
           {overrides.editMode && (
             <p className="text-xs text-muted-foreground mt-1">
-              Clique ⇄ junto ao nome para trocar operadores. Clique num bloco para mover uma tarefa individual.
+              Clique ⇄ junto ao nome para trocar operadores. Arraste uma tarefa para a mover entre operadores.
             </p>
           )}
         </CardHeader>
