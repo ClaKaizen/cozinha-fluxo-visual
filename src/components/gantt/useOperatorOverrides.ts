@@ -312,7 +312,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   const activeReorder = editMode ? draftReorder : savedReorder;
 
   const effectiveRows = useMemo(
-    () => applyReorderAndRecompute(schedule.operatorRows, activeOverrides, activeReorder, anchors),
+    () => applyReorderAndRecompute(schedule.operatorRows, activeOverrides, activeReorder, anchors, schedule.machineRows),
     [schedule.operatorRows, activeOverrides, activeReorder, anchors],
   );
 
@@ -372,7 +372,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
 
   const swapOperators = useCallback(
     (opA: string, opB: string) => {
-      const currentRows = applyReorderAndRecompute(schedule.operatorRows, draftOverrides, draftReorder, anchors);
+      const currentRows = applyReorderAndRecompute(schedule.operatorRows, draftOverrides, draftReorder, anchors, schedule.machineRows);
       const rowA = currentRows.find((r) => r.label === opA);
       const rowB = currentRows.find((r) => r.label === opB);
       if (!rowA || !rowB) return;
@@ -390,7 +390,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
 
   const moveTask = useCallback(
     (taskId: string, fromOp: string, toOp: string) => {
-      const currentRows = applyReorderAndRecompute(schedule.operatorRows, draftOverrides, draftReorder, anchors);
+      const currentRows = applyReorderAndRecompute(schedule.operatorRows, draftOverrides, draftReorder, anchors, schedule.machineRows);
       const newOverrides: ManualOverride = {};
       for (const row of currentRows) {
         newOverrides[row.label] = row.tasks
@@ -407,7 +407,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
   // NEW: drag-and-drop reorder/move with explicit insert index
   const reorderTasks = useCallback(
     (taskId: string, fromOp: string, toOp: string, insertIndex: number) => {
-      const currentRows = applyReorderAndRecompute(schedule.operatorRows, draftOverrides, draftReorder, anchors);
+      const currentRows = applyReorderAndRecompute(schedule.operatorRows, draftOverrides, draftReorder, anchors, schedule.machineRows);
       const orderMap: Record<string, string[]> = {};
       for (const row of currentRows) {
         orderMap[row.label] = row.tasks.map((t) => t.id);
@@ -445,7 +445,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
 
   const getAvailableTargets = useCallback(
     (taskId: string, fromOp: string): string[] => {
-      const currentRows = applyReorderAndRecompute(schedule.operatorRows, draftOverrides, draftReorder, anchors);
+      const currentRows = applyReorderAndRecompute(schedule.operatorRows, draftOverrides, draftReorder, anchors, schedule.machineRows);
       const task = currentRows
         .flatMap((r) => r.tasks)
         .find((t) => t.id === taskId);
