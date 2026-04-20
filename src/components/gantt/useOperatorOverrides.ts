@@ -10,13 +10,44 @@ import { OPERATOR_HARD_STOP, formatClock } from "./scheduler";
 
 const isDev = import.meta.env?.DEV ?? false;
 
+// Janela de almoço obrigatória (sem produção) — 12:00–13:00
+const MANDATORY_LUNCH_START = 12 * 60; // 720
+const MANDATORY_LUNCH_END = 13 * 60;   // 780
+
 // ── Segment rebuild (mirrors scheduler.buildOperatorSegments) ─
+// Respeita simultaneamente a janela obrigatória 12:00–13:00 e o
+// almoço específico do operador (caso esteja deslocado).
 function rebuildOperatorSegments(
   start: number,
   duration: number,
   lunchStart: number,
   lunchEnd: number,
 ): { start: number; end: number; segments: TimelineSegment[] } {
+  // Combinar a janela obrigatória com o almoço específico do operador
+  // para garantir que NUNCA é desenhado nada entre 12:00 e 13:00.
+  const breaks: Array<{ start: number; end: number }> = [
+    { start: MANDATORY_LUNCH_START, end: MANDATORY_LUNCH_END },
+  ];
+  if (Number.isFinite(lunchStart) && Number.isFinite(lunchEnd) && lunchEnd > lunchStart) {
+    breaks.push({ start: lunchStart, end: lunchEnd });
+  }
+  // Ordenar por início
+  breaks.sort((a, b) => a.start - b.start);
+
+  const isInsideBreak = (t: number): { start: number; end: number } | null => {
+    for (const b of breaks) {
+      if (t >= b.start && t < b.end) return b;
+    }
+    return null;
+  };
+  const nextBreakStartAfter = (t: number): number => {
+    let next = Number.POSITIVE_INFINITY;
+    for (const b of breaks) {
+      if (b.start > t && b.start < next) next = b.start;
+    }
+    return next;
+  };
+
   const segments: TimelineSegment[] = [];
   let cursor = start;
   let remaining = duration;
@@ -26,12 +57,15 @@ function rebuildOperatorSegments(
   }
 
   while (remaining > 0) {
-    if (cursor >= lunchStart && cursor < lunchEnd) {
-      cursor = lunchEnd;
+    // Se cair dentro de uma pausa, saltar para o fim dessa pausa
+    const inside = isInsideBreak(cursor);
+    if (inside) {
+      cursor = inside.end;
     }
     let nextBoundary = cursor + remaining;
-    if (cursor < lunchStart && nextBoundary > lunchStart) {
-      nextBoundary = lunchStart;
+    const upcomingBreak = nextBreakStartAfter(cursor);
+    if (nextBoundary > upcomingBreak) {
+      nextBoundary = upcomingBreak;
     }
     const isOverflow = cursor >= OPERATOR_HARD_STOP;
     const segEnd = isOverflow ? cursor + remaining : nextBoundary;
