@@ -170,7 +170,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
 
   // Move a single task to a different operator
   const moveTask = useCallback(
-    (taskId: string, fromOp: string, toOp: string) => {
+    (taskId: string, fromOp: string, toOp: string, insertAtIndex?: number) => {
       const currentRows = applyOverrides(schedule.operatorRows, draftOverrides);
 
       // Build new overrides ensuring all task assignments are captured
@@ -178,11 +178,16 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
       for (const row of currentRows) {
         newOverrides[row.label] = row.tasks
           .map((t) => t.id)
-          .filter((id) => (row.label === fromOp ? id !== taskId : true));
+          .filter((id) => id !== taskId);
       }
-      // Add the moved task to target
+      // Insert the moved task into target at requested position (or append)
       if (!newOverrides[toOp]) newOverrides[toOp] = [];
-      newOverrides[toOp].push(taskId);
+      if (insertAtIndex === undefined || insertAtIndex >= newOverrides[toOp].length) {
+        newOverrides[toOp].push(taskId);
+      } else {
+        const safeIndex = Math.max(0, insertAtIndex);
+        newOverrides[toOp].splice(safeIndex, 0, taskId);
+      }
 
       setDraftOverrides(newOverrides);
     },

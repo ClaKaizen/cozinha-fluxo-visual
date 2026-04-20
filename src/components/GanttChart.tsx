@@ -303,9 +303,12 @@ function OperatorGanttSection({
   overriddenOperators: Set<string>;
   allOperatorLabels: string[];
   onSwapOperators: (opA: string, opB: string) => void;
-  onMoveTask: (taskId: string, fromOp: string, toOp: string) => void;
+  onMoveTask: (taskId: string, fromOp: string, toOp: string, insertAtIndex?: number) => void;
   getAvailableTargets: (taskId: string, fromOp: string) => string[];
 }) {
+  const [dragState, setDragState] = useState<{ taskId: string; fromOp: string } | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ opLabel: string; insertionIndex: number } | null>(null);
+
   if (rows.length === 0) {
     return (
       <p className="py-4 text-center text-sm text-muted-foreground">Sem operadores presentes na Escala para este dia.</p>
@@ -367,7 +370,55 @@ function OperatorGanttSection({
                     </Tooltip>
                   )}
                 </div>
-                <div className="relative h-full flex-1 border-b border-border/30 bg-muted/5" style={{ width: chartWidth }}>
+                <div
+                  className="relative h-full flex-1 border-b border-border/30 bg-muted/5"
+                  style={{
+                    width: chartWidth,
+                    backgroundColor:
+                      editMode && dropTarget?.opLabel === row.label ? 'rgba(255,217,102,0.12)' : undefined,
+                  }}
+                  onDragOver={
+                    editMode
+                      ? (e) => {
+                          e.preventDefault();
+                          if (!dragState) return;
+                          const blocks = Array.from(
+                            e.currentTarget.querySelectorAll('[data-task-block]'),
+                          );
+                          let insertionIndex = row.tasks.length;
+                          for (let i = 0; i < blocks.length; i++) {
+                            const blockRect = blocks[i].getBoundingClientRect();
+                            if (e.clientX < blockRect.left + blockRect.width / 2) {
+                              insertionIndex = i;
+                              break;
+                            }
+                          }
+                          setDropTarget((prev) =>
+                            prev?.opLabel === row.label && prev.insertionIndex === insertionIndex
+                              ? prev
+                              : { opLabel: row.label, insertionIndex },
+                          );
+                        }
+                      : undefined
+                  }
+                  onDragLeave={editMode ? () => setDropTarget(null) : undefined}
+                  onDrop={
+                    editMode
+                      ? (e) => {
+                          e.preventDefault();
+                          if (!dragState) return;
+                          onMoveTask(
+                            dragState.taskId,
+                            dragState.fromOp,
+                            row.label,
+                            dropTarget?.insertionIndex,
+                          );
+                          setDragState(null);
+                          setDropTarget(null);
+                        }
+                      : undefined
+                  }
+                >
                   {rowLunch && (
                     <div className="absolute top-0 z-[1] rounded bg-muted/60" style={{ left: `${lunchLeft}%`, width: `${lunchWidth}%`, height: rowHeight }} />
                   )}
@@ -386,20 +437,42 @@ function OperatorGanttSection({
                       const isOverflow = seg.overflow;
                       const isConflict = conflictTaskIds.has(task.id);
                       const labelPrefix = isOverflow ? "⚠ " : task.showSimultaneousBadge ? "⊗ " : "";
+                      const isDragging = dragState?.taskId === task.id;
+                      const isFirstSeg = si === 0;
 
                       const blockEl = (
                         <div
                           key={`${task.id}-${si}`}
+                          {...(isFirstSeg ? { 'data-task-block': 'true' } : {})}
+                          draggable={editMode && isFirstSeg}
+                          onDragStart={
+                            editMode && isFirstSeg
+                              ? (e) => {
+                                  e.dataTransfer.effectAllowed = 'move';
+                                  setDragState({ taskId: task.id, fromOp: row.label });
+                                }
+                              : undefined
+                          }
+                          onDragEnd={
+                            editMode && isFirstSeg
+                              ? () => {
+                                  setDragState(null);
+                                  setDropTarget(null);
+                                }
+                              : undefined
+                          }
                           className={`absolute top-1 flex h-[34px] flex-col justify-center overflow-hidden rounded-md border px-0.5 text-[10px] font-semibold text-foreground shadow-sm z-10 ${
                             isConflict
                               ? "border-2 border-destructive ring-1 ring-destructive/30"
                               : isOverflow
                               ? "border-dashed border-red-500 bg-red-100/60 dark:bg-red-900/30"
                               : ""
-                          } ${editMode ? "cursor-pointer hover:ring-2 hover:ring-primary/40" : ""}`}
+                          } ${editMode ? "hover:ring-2 hover:ring-primary/40" : ""}`}
                           style={{
                             left: `${left}%`,
                             width: `${width}%`,
+                            cursor: editMode && isFirstSeg ? 'grab' : 'default',
+                            opacity: isDragging ? 0.4 : 1,
                             ...(isOverflow
                               ? { backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(239,68,68,0.15) 4px, rgba(239,68,68,0.15) 8px)' }
                               : {
@@ -432,6 +505,49 @@ function OperatorGanttSection({
                       return blockEl;
                     })
                   )}
+                  {editMode && dropTarget?.opLabel === row.label && (() => {
+                    // Compute insertion indicator left position based on first-segment task blocks
+                    const firstSegs = row.tasks.map((t) => t.segments[0]).filter(Boolean);
+                    let leftPct: number;
+                    if (firstSegs.length === 0) {
+                      leftPct = 0;
+                    } else if (dropTarget.insertionIndex >= firstSegs.length) {
+                      const last = firstSegs[firstSegs.length - 1];
+                      leftPct = toPercent(last.end);
+                    } else {
+                      const target = firstSegs[dropTarget.insertionIndex];
+                      leftPct = toPercent(target.start);
+                    }
+                    return (
+                      <div
+                        className="pointer-events-none absolute top-0 z-20"
+                        style={{ left: `${leftPct}%`, height: rowHeight, width: 2, backgroundColor: '#44546A', transform: 'translateX(-1px)' }}
+                      >
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: -2,
+                            top: -3,
+                            width: 6,
+                            height: 6,
+                            borderRadius: 9999,
+                            backgroundColor: '#44546A',
+                          }}
+                        />
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: -2,
+                            bottom: -3,
+                            width: 6,
+                            height: 6,
+                            borderRadius: 9999,
+                            backgroundColor: '#44546A',
+                          }}
+                        />
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             );
@@ -602,7 +718,7 @@ export default function GanttChart({ schedule }: GanttChartProps) {
           </div>
           {overrides.editMode && (
             <p className="text-xs text-muted-foreground mt-1">
-              Clique ⇄ junto ao nome para trocar operadores. Clique num bloco para mover uma tarefa individual.
+              Clique ⇄ junto ao nome para trocar operadores. Arraste uma tarefa para a mover entre operadores.
             </p>
           )}
         </CardHeader>
