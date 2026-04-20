@@ -313,7 +313,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
 
   const effectiveRows = useMemo(
     () => applyReorderAndRecompute(schedule.operatorRows, activeOverrides, activeReorder, anchors, schedule.machineRows),
-    [schedule.operatorRows, activeOverrides, activeReorder, anchors],
+    [schedule.operatorRows, schedule.machineRows, activeOverrides, activeReorder, anchors],
   );
 
   const conflicts = useMemo(() => detectConflicts(effectiveRows), [effectiveRows]);
@@ -385,7 +385,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
       setDraftOverrides(newOverrides);
       setDraftReorder(newReorder);
     },
-    [schedule.operatorRows, draftOverrides, draftReorder, anchors],
+    [schedule.operatorRows, schedule.machineRows, draftOverrides, draftReorder, anchors],
   );
 
   const moveTask = useCallback(
@@ -401,7 +401,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
       newOverrides[toOp].push(taskId);
       setDraftOverrides(newOverrides);
     },
-    [schedule.operatorRows, draftOverrides, draftReorder, anchors],
+    [schedule.operatorRows, schedule.machineRows, draftOverrides, draftReorder, anchors],
   );
 
   // NEW: drag-and-drop reorder/move with explicit insert index
@@ -440,7 +440,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
       setDraftOverrides(newOverrides);
       setDraftReorder(newReorder);
     },
-    [schedule.operatorRows, draftOverrides, draftReorder, anchors],
+    [schedule.operatorRows, schedule.machineRows, draftOverrides, draftReorder, anchors],
   );
 
   const getAvailableTargets = useCallback(
@@ -455,7 +455,7 @@ export function useOperatorOverrides(schedule: DailyGanttSchedule) {
         .filter((r) => canMoveTaskTo(task, r, taskId))
         .map((r) => r.label);
     },
-    [schedule.operatorRows, draftOverrides, draftReorder, anchors],
+    [schedule.operatorRows, schedule.machineRows, draftOverrides, draftReorder, anchors],
   );
 
   return {
