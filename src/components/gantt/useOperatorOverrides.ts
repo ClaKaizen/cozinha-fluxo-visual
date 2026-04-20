@@ -80,8 +80,15 @@ function detectConflicts(rows: GanttRow<OperatorTask>[]): OperatorConflict[] {
 export function applyOverrides(
   originalRows: GanttRow<OperatorTask>[],
   overrides: ManualOverride,
+  operatorLunchBreaks: Record<string, OperatorLunchBreak> = {},
 ): GanttRow<OperatorTask>[] {
-  if (Object.keys(overrides).length === 0) return originalRows;
+  // Anchor = start of first task in original row (before override)
+  const anchorByRow = new Map<string, number>();
+  for (const row of originalRows) {
+    if (row.tasks.length > 0) {
+      anchorByRow.set(row.label, row.tasks[0].start);
+    }
+  }
 
   // Build a flat pool of all tasks
   const allTasks = new Map<string, OperatorTask>();
@@ -93,28 +100,78 @@ export function applyOverrides(
 
   // Build assignment map: taskId → operatorLabel from overrides
   const taskToOperator = new Map<string, string>();
+  // Also preserve order from override arrays
+  const orderInTarget = new Map<string, number>();
   for (const [opLabel, taskIds] of Object.entries(overrides)) {
-    for (const tid of taskIds) {
+    taskIds.forEach((tid, idx) => {
       taskToOperator.set(tid, opLabel);
-    }
+      orderInTarget.set(tid, idx);
+    });
   }
 
   // For tasks NOT in any override, keep original assignment
   for (const row of originalRows) {
-    for (const task of row.tasks) {
+    row.tasks.forEach((task, idx) => {
       if (!taskToOperator.has(task.id)) {
         taskToOperator.set(task.id, row.label);
+        orderInTarget.set(task.id, idx + 1_000_000); // append after explicit overrides
       }
-    }
+    });
   }
+
+  const hasOverrides = Object.keys(overrides).length > 0;
 
   // Rebuild rows
   return originalRows.map((row) => {
-    const tasks = Array.from(allTasks.values())
-      .filter((t) => taskToOperator.get(t.id) === row.label)
-      .map((t) => ({ ...t, operatorName: row.label }))
-      .sort((a, b) => a.start - b.start);
-    return { ...row, tasks };
+    const assignedTasks = Array.from(allTasks.values()).filter(
+      (t) => taskToOperator.get(t.id) === row.label,
+    );
+
+    if (!hasOverrides) {
+      // No overrides → return original ordering & timing untouched
+      return {
+        ...row,
+        tasks: assignedTasks
+          .map((t) => ({ ...t, operatorName: row.label }))
+          .sort((a, b) => a.start - b.start),
+      };
+    }
+
+    // Sort by override-defined order
+    assignedTasks.sort((a, b) => {
+      const oa = orderInTarget.get(a.id) ?? 0;
+      const ob = orderInTarget.get(b.id) ?? 0;
+      return oa - ob;
+    });
+
+    // Recalculate start/end/segments sequentially from anchor
+    const lunch = operatorLunchBreaks[row.label];
+    const lunchStart = lunch?.start ?? Number.POSITIVE_INFINITY;
+    const lunchEnd = lunch?.end ?? Number.POSITIVE_INFINITY;
+    const anchor = anchorByRow.get(row.label) ?? (assignedTasks[0]?.start ?? 0);
+
+    let cursor = anchor;
+    const recalculated: OperatorTask[] = assignedTasks.map((t) => {
+      const dur = t.operatorDuration ?? 0;
+      const built = rebuildOperatorSegments(cursor, dur, lunchStart, lunchEnd);
+      cursor = built.end;
+      return {
+        ...t,
+        operatorName: row.label,
+        start: built.start,
+        end: built.end,
+        segments: built.segments,
+      };
+    });
+
+    if (isDev && recalculated.some((t) => t.end > OPERATOR_HARD_STOP)) {
+      const overflows = recalculated
+        .filter((t) => t.end > OPERATOR_HARD_STOP)
+        .map((t) => `${t.doseLabel} → ${formatClock(t.end)}`);
+      console.warn(`[Override] ${row.label}: tarefas após 15:30 →`, overflows);
+    }
+
+    return { ...row, tasks: recalculated };
   });
 }
 
