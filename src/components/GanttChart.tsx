@@ -793,10 +793,13 @@ export default function GanttChart({ schedule, dateStr }: GanttChartProps) {
 
   const sharedAxisEnd = Math.max(schedule.axisEnd, DAY_END + 30);
 
-  const effectiveMachineRows = useMemo(
-    () => computeEffectiveMachineRows(overrides.effectiveRows, schedule.machineRows),
-    [overrides.effectiveRows, schedule.machineRows],
-  );
+  const effectiveMachineRows = useMemo(() => {
+    // Guard: no overrides active → original rows are already correct
+    if (Object.keys(overrides.activeOverrides).length === 0) {
+      return schedule.machineRows;
+    }
+    return computeEffectiveMachineRows(overrides.effectiveRows, schedule.machineRows);
+  }, [overrides.effectiveRows, schedule.machineRows, overrides.activeOverrides]);
 
   const effectiveSchedule: DailyGanttSchedule = {
     ...schedule,
