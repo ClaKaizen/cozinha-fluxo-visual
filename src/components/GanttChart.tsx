@@ -42,7 +42,7 @@ function computeEffectiveMachineRows(
   effectiveOperatorRows: GanttRow<OperatorTask>[],
   originalMachineRows: GanttRow<MachineTask>[],
 ): GanttRow<MachineTask>[] {
-  // 1. Build map: machineTaskId → new {start, end}
+  // 1. Build timing updates keyed by machineTaskId
   const timingMap = new Map<string, { start: number; end: number }>();
   for (const opRow of effectiveOperatorRows) {
     for (const task of opRow.tasks) {
@@ -55,87 +55,103 @@ function computeEffectiveMachineRows(
     }
   }
 
-  // 2. Apply updated timings to all machine tasks
-  const allUpdatedTasks: MachineTask[] = originalMachineRows.flatMap((row) =>
-    row.tasks.map((mt) => {
+  // 2. Apply timing updates while preserving original machineLabel assignment
+  const rowTaskMap = new Map<string, MachineTask[]>();
+  for (const row of originalMachineRows) {
+    rowTaskMap.set(row.label, []);
+  }
+  for (const row of originalMachineRows) {
+    for (const mt of row.tasks) {
       const t = timingMap.get(mt.id);
-      if (!t) return { ...mt };
-      return {
-        ...mt,
-        start: t.start,
-        end: t.end,
-        segments: mt.segments?.length
-          ? [{ ...mt.segments[0], start: t.start, end: t.end }]
-          : mt.segments,
-      };
-    }),
-  );
+      const updatedTask: MachineTask = t
+        ? {
+            ...mt,
+            start: t.start,
+            end: t.end,
+            segments: mt.segments?.length
+              ? [{ ...mt.segments[0], start: t.start, end: t.end }]
+              : mt.segments,
+          }
+        : { ...mt };
 
-  // 3. Group rows by equipment type prefix (e.g. "Basculante 1" → "Basculante")
+      const targetLabel = updatedTask.machineLabel || row.label;
+      if (rowTaskMap.has(targetLabel)) {
+        rowTaskMap.get(targetLabel)!.push(updatedTask);
+      } else {
+        rowTaskMap.get(row.label)!.push(updatedTask);
+      }
+    }
+  }
+
+  // 3. Sort tasks in each row by start time
+  for (const [, tasks] of rowTaskMap) {
+    tasks.sort((a, b) => a.start - b.start);
+  }
+
+  // 4. Detect and resolve overlaps within each row
   const prefixOf = (label: string) => label.replace(/\s+\d+$/, "").trim();
-  const typeOrder: string[] = [];
-  const typeUnitCount = new Map<string, number>();
+  const rowsByPrefix = new Map<string, string[]>();
   for (const row of originalMachineRows) {
     const prefix = prefixOf(row.label);
-    if (!typeUnitCount.has(prefix)) {
-      typeOrder.push(prefix);
-      typeUnitCount.set(prefix, 0);
-    }
-    typeUnitCount.set(prefix, typeUnitCount.get(prefix)! + 1);
+    if (!rowsByPrefix.has(prefix)) rowsByPrefix.set(prefix, []);
+    rowsByPrefix.get(prefix)!.push(row.label);
   }
 
-  // 4. Assign each updated task to its equipment type
-  const tasksByType = new Map<string, MachineTask[]>();
-  for (const prefix of typeOrder) tasksByType.set(prefix, []);
-  for (const mt of allUpdatedTasks) {
-    const originalRow = originalMachineRows.find((r) =>
-      r.tasks.some((t) => t.id === mt.id),
-    );
-    if (!originalRow) continue;
-    const prefix = prefixOf(originalRow.label);
-    tasksByType.get(prefix)?.push(mt);
-  }
-
-  // 5. Greedy interval packing — guaranteed zero overlap per slot
-  const resultRows: GanttRow<MachineTask>[] = [];
-  for (const prefix of typeOrder) {
-    const unitCount = typeUnitCount.get(prefix)!;
-    const tasks = (tasksByType.get(prefix) ?? [])
-      .slice()
-      .sort((a, b) => a.start - b.start);
-
-    const slots: MachineTask[][] = Array.from({ length: unitCount }, () => []);
-    const slotFreeAt: number[] = new Array(unitCount).fill(0);
+  for (const row of originalMachineRows) {
+    const rowLabel = row.label;
+    const tasks = rowTaskMap.get(rowLabel) ?? [];
+    const resolved: MachineTask[] = [];
+    const displaced: MachineTask[] = [];
 
     for (const task of tasks) {
+      const lastResolved = resolved[resolved.length - 1];
+      if (!lastResolved || lastResolved.end <= task.start) {
+        resolved.push(task);
+      } else {
+        if (timingMap.has(task.id)) {
+          displaced.push(task);
+        } else {
+          displaced.push(resolved.pop()!);
+          resolved.push(task);
+        }
+      }
+    }
+    rowTaskMap.set(rowLabel, resolved);
+
+    const prefix = prefixOf(rowLabel);
+    const altLabels = (rowsByPrefix.get(prefix) ?? []).filter(
+      (l) => l !== rowLabel,
+    );
+    for (const displacedTask of displaced) {
       let placed = false;
-      for (let i = 0; i < unitCount; i++) {
-        if (slotFreeAt[i] <= task.start) {
-          slots[i].push(task);
-          slotFreeAt[i] = task.end;
+      for (const altLabel of altLabels) {
+        const altTasks = rowTaskMap.get(altLabel) ?? [];
+        const lastAlt = altTasks[altTasks.length - 1];
+        if (!lastAlt || lastAlt.end <= displacedTask.start) {
+          altTasks.push(displacedTask);
+          altTasks.sort((a, b) => a.start - b.start);
+          rowTaskMap.set(altLabel, altTasks);
           placed = true;
           break;
         }
       }
-      if (!placed) {
-        const least = slotFreeAt.indexOf(Math.min(...slotFreeAt));
-        slots[least].push(task);
-        slotFreeAt[least] = task.end;
+      if (!placed && altLabels.length > 0) {
+        const leastBusy = altLabels.reduce((best, l) => {
+          const lastEnd = (rowTaskMap.get(l) ?? []).at(-1)?.end ?? 0;
+          const bestEnd = (rowTaskMap.get(best) ?? []).at(-1)?.end ?? 0;
+          return lastEnd < bestEnd ? l : best;
+        });
+        rowTaskMap.get(leastBusy)!.push(displacedTask);
+        rowTaskMap.get(leastBusy)!.sort((a, b) => a.start - b.start);
       }
-    }
-
-    const prefixRows = originalMachineRows.filter(
-      (r) => prefixOf(r.label) === prefix,
-    );
-    for (let i = 0; i < prefixRows.length; i++) {
-      resultRows.push({
-        ...prefixRows[i],
-        tasks: (slots[i] ?? []).sort((a, b) => a.start - b.start),
-      });
     }
   }
 
-  return resultRows;
+  // 5. Build result rows preserving original row order and labels
+  return originalMachineRows.map((row) => ({
+    ...row,
+    tasks: (rowTaskMap.get(row.label) ?? []).sort((a, b) => a.start - b.start),
+  }));
 }
 
 function colorFill(index: number, overflow: boolean) {
