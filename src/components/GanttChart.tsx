@@ -775,6 +775,19 @@ export default function GanttChart({ schedule, dateStr }: GanttChartProps) {
     [schedule.operatorRows],
   );
 
+  const sharedAxisEnd = Math.max(schedule.axisEnd, DAY_END + 30);
+
+  const effectiveMachineRows = useMemo(
+    () => computeEffectiveMachineRows(overrides.effectiveRows, schedule.machineRows),
+    [overrides.effectiveRows, schedule.machineRows],
+  );
+
+  const effectiveSchedule: DailyGanttSchedule = {
+    ...schedule,
+    operatorRows: overrides.effectiveRows,
+    machineRows: effectiveMachineRows,
+  };
+
   if (schedule.tasks.length === 0) {
     return (
       <Card>
@@ -783,21 +796,6 @@ export default function GanttChart({ schedule, dateStr }: GanttChartProps) {
       </Card>
     );
   }
-
-  const sharedAxisEnd = Math.max(schedule.axisEnd, DAY_END + 30);
-
-  // Recompute machine rows from effective operator timings
-  const effectiveMachineRows = useMemo(
-    () => computeEffectiveMachineRows(overrides.effectiveRows, schedule.machineRows),
-    [overrides.effectiveRows, schedule.machineRows],
-  );
-
-  // Build effective schedule for downstream sections
-  const effectiveSchedule: DailyGanttSchedule = {
-    ...schedule,
-    operatorRows: overrides.effectiveRows,
-    machineRows: effectiveMachineRows,
-  };
 
   return (
     <div className="space-y-4">
