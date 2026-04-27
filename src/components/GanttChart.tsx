@@ -139,8 +139,21 @@ function computeEffectiveMachineRows(
         }
       }
       if (!placed) {
-        // No alt row has space — keep in original row (overlap visible rather than silently migrated)
-        resolved.push(displacedTask);
+        // No alt row has space — keep in original row and mark first segment as overflow
+        // so the user sees the conflict instead of a silent migration to a busy alt row.
+        const firstSeg = displacedTask.segments?.[0];
+        const taskWithOverflow: MachineTask = firstSeg
+          ? {
+              ...displacedTask,
+              segments: [
+                { ...firstSeg, overflow: true },
+                ...displacedTask.segments.slice(1),
+              ],
+            }
+          : displacedTask;
+        resolved.push(taskWithOverflow);
+        // Re-sort to maintain start-order invariant for the overlap check above
+        resolved.sort((a, b) => a.start - b.start);
       }
     }
   }

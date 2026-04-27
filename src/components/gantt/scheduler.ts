@@ -199,8 +199,12 @@ function operatorIsFreeAt(op: OperatorState, start: number, duration: number): b
 /**
  * Get the earliest time an operator can start a task of given duration.
  * Returns the start time or -1 if impossible.
+ *
+ * `isLunchSafe = false` (default) additionally blocks the mandatory [12:00, 13:00] window
+ * regardless of the operator's personal lunch state. Lunch-safe categories may be confectioned
+ * during this period, so they pass `true` to relax the block.
  */
-function getOperatorEarliestStart(op: OperatorState, minStart: number, duration: number): number {
+function getOperatorEarliestStart(op: OperatorState, minStart: number, duration: number, isLunchSafe: boolean = false): number {
   if (op.totalWorked + duration > OPERATOR_PRODUCTIVE_MINUTES) return -1;
 
   let effectiveStart = Math.max(op.cursor, minStart);
@@ -223,17 +227,32 @@ function getOperatorEarliestStart(op: OperatorState, minStart: number, duration:
     }
   }
 
+  // Additional mandatory lunch enforcement for non-lunchSafe categories: the operator may
+  // never be considered available during 12:00–13:00, even if their personal lunch is shifted
+  // (e.g. lunchStart = 12:30 leaves 12:00–12:30 visible to the personal-lunch check).
+  if (!isLunchSafe) {
+    if (effectiveStart < LUNCH_WINDOW_START && effectiveStart + duration > LUNCH_WINDOW_START) {
+      effectiveStart = sharedLunchEnd;
+    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < sharedLunchEnd) {
+      effectiveStart = sharedLunchEnd;
+    }
+  }
+
   if (effectiveStart + duration > OPERATOR_HARD_STOP) return -1;
   return effectiveStart;
 }
 
 /**
  * Commit an operator to a task: update cursor, worked time, and handle lunch.
+ *
+ * `isLunchSafe = false` (default) additionally enforces the mandatory [12:00, 13:00] window
+ * for non-lunch-safe tasks, mirroring `getOperatorEarliestStart`.
  */
-function commitOperator(op: OperatorState, taskStart: number, duration: number): { opStart: number; opEnd: number } {
+function commitOperator(op: OperatorState, taskStart: number, duration: number, isLunchSafe: boolean = false): { opStart: number; opEnd: number } {
   let effectiveStart = Math.max(op.cursor, taskStart);
   const sharedLunchStart = op.lunchStart;
   const sharedLunchEnd = sharedLunchStart + LUNCH_DURATION_MIN;
+  const mandatoryLunchEnd = LUNCH_WINDOW_START + LUNCH_DURATION_MIN;
 
   if (!op.hadLunch) {
     if (effectiveStart < sharedLunchStart) {
@@ -253,6 +272,15 @@ function commitOperator(op: OperatorState, taskStart: number, duration: number):
   } else {
     if (effectiveStart >= op.lunchStart && effectiveStart < op.lunchEnd) {
       effectiveStart = op.lunchEnd;
+    }
+  }
+
+  // Mandatory 12:00–13:00 enforcement for non-lunchSafe tasks (matches getOperatorEarliestStart).
+  if (!isLunchSafe) {
+    if (effectiveStart < LUNCH_WINDOW_START && effectiveStart + duration > LUNCH_WINDOW_START) {
+      effectiveStart = mandatoryLunchEnd;
+    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < mandatoryLunchEnd) {
+      effectiveStart = mandatoryLunchEnd;
     }
   }
 
@@ -1126,7 +1154,8 @@ function jointSchedule(
       // Commit operator and register continuity
       if (result.operatorName && task.operatorDuration > 0) {
         const op = operators.find((o) => o.name === result.operatorName)!;
-        if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
+        const taskIsLunchSafe = lunchSafeCategories.includes(task.categoryId);
+        if (op) commitOperator(op, result.operatorStart, task.operatorDuration, taskIsLunchSafe);
         registerGroupOperator(task.equipmentId, result.operatorName);
         registerCommitment(result.operatorName, task, pending);
       }
@@ -1371,7 +1400,8 @@ function jointSchedule(
         }
         if (result.operatorName && task.operatorDuration > 0) {
           const op = operators.find((o) => o.name === result.operatorName)!;
-          if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
+          const taskIsLunchSafe = lunchSafeCategories.includes(task.categoryId);
+          if (op) commitOperator(op, result.operatorStart, task.operatorDuration, taskIsLunchSafe);
           registerGroupOperator(task.equipmentId, result.operatorName);
           registerCommitment(result.operatorName, task, pending);
         }
@@ -1427,9 +1457,68 @@ function jointSchedule(
       for (const a of sorted) {
         if (a.operatorName && a.task.operatorDuration > 0) {
           const op = operators.find((o) => o.name === a.operatorName);
-          if (op) commitOperator(op, a.operatorStart, a.task.operatorDuration);
+          const taskIsLunchSafe = lunchSafeCategories.includes(a.task.categoryId);
+          if (op) commitOperator(op, a.operatorStart, a.task.operatorDuration, taskIsLunchSafe);
         }
       }
+    }
+  }
+
+  // ── Post-scheduling rebalance: minimise operator load imbalance > 30 min ──
+  // Move heaviest tasks from the most-loaded operator to the least-loaded operator,
+  // preserving the original time slot and machine assignment. Only safe moves are made:
+  // capacity respected, no overlap with destination operator's existing tasks, and the
+  // task does not cross the mandatory lunch window (which would require lunch-state surgery).
+  if (operators.length >= 2) {
+    const lunchBlockStart = LUNCH_WINDOW_START;
+    const lunchBlockEnd = LUNCH_WINDOW_START + LUNCH_DURATION_MIN;
+    const maxAttempts = operators.length * 3;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const sortedOps = [...operators].sort((a, b) => b.totalWorked - a.totalWorked);
+      const heaviest = sortedOps[0];
+      const lightest = sortedOps[sortedOps.length - 1];
+      if (heaviest.totalWorked - lightest.totalWorked <= 30) break;
+
+      // Skip operators dedicated to single-op equipment (e.g. Fritadeira) — they cannot be
+      // freely rebalanced without breaking equipment-level locks.
+      if (dedicatedSingleOpEquipOperators.has(heaviest.name)) break;
+      if (dedicatedSingleOpEquipOperators.has(lightest.name)) break;
+
+      const heavyAssignments = assignments
+        .filter(a => a.operatorName === heaviest.name && a.task.operatorDuration > 0)
+        .sort((a, b) => b.task.operatorDuration - a.task.operatorDuration);
+
+      let moved = false;
+      for (const candidate of heavyAssignments) {
+        // Skip tasks that cross the mandatory lunch window — moving them requires
+        // recomputing lunch state for the destination operator, which is too invasive here.
+        if (candidate.operatorStart < lunchBlockEnd && candidate.operatorEnd > lunchBlockStart) continue;
+
+        // Capacity check on destination
+        if (lightest.totalWorked + candidate.task.operatorDuration > OPERATOR_PRODUCTIVE_MINUTES) continue;
+
+        // No overlap with destination operator's existing tasks
+        const overlaps = assignments.some(a =>
+          a.operatorName === lightest.name &&
+          a.operatorStart < candidate.operatorEnd &&
+          a.operatorEnd > candidate.operatorStart,
+        );
+        if (overlaps) continue;
+
+        // Don't move a task whose artigo is committed to another operator (commitment continuity)
+        const otherCommitment = operatorCommitments.get(lightest.name);
+        if (otherCommitment && otherCommitment.artigo !== candidate.task.artigo && otherCommitment.remaining > 0) continue;
+
+        // Perform the move (machine slot and time stay the same — only operator changes)
+        candidate.operatorName = lightest.name;
+        heaviest.totalWorked -= candidate.task.operatorDuration;
+        lightest.totalWorked += candidate.task.operatorDuration;
+        moved = true;
+        break;
+      }
+
+      if (!moved) break;
     }
   }
 
@@ -1491,22 +1580,24 @@ function tryJointSlot(
 
     // Lunch constraint: only block if the OPERATOR's T.Homem would cross lunch.
     // The machine can run autonomously during lunch once T.Homem is done.
+    // Use the real operator earliest start (not machineStart) — the operator may only become
+    // available later than the machine, so the crossing must be evaluated from when T.Homem
+    // would actually start. If it crosses noon, jump exactly to the end of the mandatory
+    // lunch window and let the next iteration find the first free machine from there.
     if (!isLunchSafe && task.operatorDuration > 0) {
-      const lunchBlockStart = LUNCH_WINDOW_START;
-      const lunchBlockEnd = LUNCH_WINDOW_START + LUNCH_DURATION_MIN;
+      let bestOpEarliestStart = Number.POSITIVE_INFINITY;
+      for (const op of operators) {
+        if (excludedOperators.has(op.name)) continue;
+        if (strictPreferred && preferredOperator && op.name !== preferredOperator) continue;
+        const s = getOperatorEarliestStart(op, machineStart, task.operatorDuration, false);
+        if (s >= 0 && s < bestOpEarliestStart) bestOpEarliestStart = s;
+      }
+      const effectiveOpStart = Number.isFinite(bestOpEarliestStart) ? bestOpEarliestStart : machineStart;
+      const operatorEndIfStarted = effectiveOpStart + task.operatorDuration;
 
-      // Check if the operator's work portion (not the full machine duration) crosses lunch
-      const operatorEndIfStartedNow = machineStart + task.operatorDuration;
-      if (machineStart < lunchBlockStart && operatorEndIfStartedNow > lunchBlockStart) {
-        // T.Homem would cross noon. Try scheduling at preLunchStart where operator ends exactly
-        // at noon — only viable if machine is already free before preLunchStart.
-        const preLunchStart = lunchBlockStart - task.operatorDuration;
-        if (machineStart < preLunchStart && preLunchStart >= Math.max(OPERATOR_START, candidateTime)) {
-          candidateTime = preLunchStart;
-        } else {
-          // Machine only free after preLunchStart — post-lunch is the only option
-          candidateTime = lunchBlockEnd;
-        }
+      if (effectiveOpStart < LUNCH_WINDOW_START && operatorEndIfStarted > LUNCH_WINDOW_START) {
+        // T.Homem would cross noon → schedule immediately after the mandatory lunch window
+        candidateTime = LUNCH_WINDOW_START + LUNCH_DURATION_MIN;
         continue;
       }
     }
@@ -1531,7 +1622,7 @@ function tryJointSlot(
     if (preferredOperator) {
       const prefOp = operators.find(o => o.name === preferredOperator);
       if (prefOp) {
-        const opStart = getOperatorEarliestStart(prefOp, machineStart, task.operatorDuration);
+        const opStart = getOperatorEarliestStart(prefOp, machineStart, task.operatorDuration, isLunchSafe);
         if (opStart >= 0) {
           // HARD CONSTRAINT: machine must not start before operator
           // If operator can't start at machineStart, advance candidateTime
@@ -1548,19 +1639,40 @@ function tryJointSlot(
 
     // If preferred didn't work (or no preferred), try all operators — but NOT if strict
     if (!bestOp && !strictPreferred) {
-      for (const op of operators) {
-        // Skip excluded operators (e.g. committed elsewhere or dedicated to Fritadeira)
-        if (excludedOperators.has(op.name)) continue;
+      // Cache eligible operators' base loads for projected-imbalance scoring
+      const eligibleOps = operators.filter(o => !excludedOperators.has(o.name));
+      const projectedImbalance = (candidate: OperatorState): number => {
+        let max = -Infinity;
+        let min = Infinity;
+        for (const op of eligibleOps) {
+          const load = op.name === candidate.name
+            ? op.totalWorked + task.operatorDuration
+            : op.totalWorked;
+          if (load > max) max = load;
+          if (load < min) min = load;
+        }
+        return max - min;
+      };
 
-        const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration);
+      let bestImbalance = Number.POSITIVE_INFINITY;
+
+      for (const op of eligibleOps) {
+        const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration, isLunchSafe);
         if (opStart < 0) continue;
 
         // HARD CONSTRAINT: only accept operators who can start at machineStart (±5min tolerance)
         if (opStart <= machineStart + 5) {
-          if (op.totalWorked < bestOpLoad || (op.totalWorked === bestOpLoad && opStart < bestOpStart)) {
+          const candidateImbalance = projectedImbalance(op);
+          // Prefer minimal projected imbalance; tie-break on opStart, then totalWorked
+          if (
+            candidateImbalance < bestImbalance ||
+            (candidateImbalance === bestImbalance && opStart < bestOpStart) ||
+            (candidateImbalance === bestImbalance && opStart === bestOpStart && op.totalWorked < bestOpLoad)
+          ) {
             bestOp = op;
             bestOpStart = opStart;
             bestOpLoad = op.totalWorked;
+            bestImbalance = candidateImbalance;
           }
         }
       }
@@ -1590,7 +1702,7 @@ function tryJointSlot(
       ? operators.filter(o => o.name === preferredOperator)
       : operators;
     for (const op of searchOps) {
-      const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration);
+      const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration, isLunchSafe);
       if (opStart >= 0 && opStart < nextOpAvail) {
         nextOpAvail = opStart;
       }
@@ -2246,11 +2358,12 @@ export function buildDailyGanttSchedule({
 
   // Replay assignments to compute operator states — each dose gets its own small T.Homem commit
   const sortedAssignments = [...result.assignments].sort((a, b) => a.operatorStart - b.operatorStart);
+  const lunchSafeSet = new Set(lunchSafeCategories ?? []);
   for (const a of sortedAssignments) {
     if (!a.operatorName || a.operatorStart >= a.operatorEnd) continue;
     const op = operatorStates.find((o) => o.name === a.operatorName);
     if (op) {
-      commitOperator(op, a.operatorStart, a.task.operatorDuration);
+      commitOperator(op, a.operatorStart, a.task.operatorDuration, lunchSafeSet.has(a.task.categoryId));
     }
   }
   for (const op of operatorStates) {

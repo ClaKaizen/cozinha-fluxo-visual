@@ -6,7 +6,7 @@ import type {
   OperatorTask,
   TimelineSegment,
 } from "./scheduler";
-import { OPERATOR_HARD_STOP, formatClock } from "./scheduler";
+import { DAY_START, OPERATOR_HARD_STOP, formatClock } from "./scheduler";
 import { useStore } from "@/store/useStore";
 
 const isDev = import.meta.env?.DEV ?? false;
@@ -183,7 +183,12 @@ export function applyOverrides(
     const lunch = operatorLunchBreaks[row.label];
     const lunchStart = lunch?.start ?? Number.POSITIVE_INFINITY;
     const lunchEnd = lunch?.end ?? Number.POSITIVE_INFINITY;
-    const anchor = anchorByRow.get(row.label) ?? (assignedTasks[0]?.start ?? 0);
+    // With overrides, operator may receive tasks that originally started earlier than the
+    // operator's own first task. Anchor must reflect the real earliest start of the assigned
+    // tasks, otherwise rebuild may push tasks into the wrong slot relative to lunch.
+    const anchor = assignedTasks.length > 0
+      ? Math.max(DAY_START, Math.min(...assignedTasks.map((t) => t.start)))
+      : (anchorByRow.get(row.label) ?? DAY_START);
 
     let cursor = anchor;
     const recalculated: OperatorTask[] = assignedTasks.map((t) => {
