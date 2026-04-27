@@ -340,7 +340,7 @@ export default function Dashboard() {
             })}
             {tempOps.map((t) => {
               const opHours = operatorHoursMap.get(t.nome) ?? 0;
-              const opRate = (opHours / 8) * 100;
+              const opRate = (opHours / t.hours) * 100;
               return (
                 <div key={t.id} className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2">
@@ -402,7 +402,7 @@ export default function Dashboard() {
                             <td className="px-2 py-1 text-right">{p.quantidade}</td>
                             <td className="px-2 py-1">{p.unidade || "-"}</td>
                             <td className="px-2 py-1">{p.cat?.nome || "-"}</td>
-                            <td className="px-2 py-1 text-right">{p.cat ? `${Math.round(p.quantidade * p.cat.tempoCicloHomem)} min` : "-"}</td>
+                            <td className="px-2 py-1 text-right">{p.cat ? `${Math.round((p.cat.tempoCicloHomem1 ?? p.cat.tempoCicloHomem) + (p.quantidade > 1 ? (p.quantidade - 1) * p.cat.tempoCicloHomem : 0))} min` : "-"}</td>
                             <td className="px-2 py-1 text-right">{p.cat ? `${Math.round(p.quantidade * p.cat.tempoCicloMaquina)} min` : "-"}</td>
                           </tr>
                         ))}

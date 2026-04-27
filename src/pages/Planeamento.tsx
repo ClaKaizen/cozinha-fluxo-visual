@@ -26,7 +26,10 @@ export default function Planeamento() {
     let mins = 0;
     prod.forEach((p) => {
       const cat = store.categories.find((c) => c.id === p.categoriaId);
-      if (cat) mins += p.quantidade * cat.tempoCicloHomem;
+      if (cat) {
+        const tH1 = cat.tempoCicloHomem1 ?? cat.tempoCicloHomem;
+        mins += tH1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloHomem : 0);
+      }
     });
     return (mins / 60) * INEFFICIENCY_FACTOR;
   };
@@ -52,9 +55,8 @@ export default function Planeamento() {
     prod.forEach((p) => {
       const cat = store.categories.find((c) => c.id === p.categoriaId);
       if (cat) {
-        const tHomem1 = cat.tempoCicloHomem1 ?? cat.tempoCicloHomem;
         const tMaq1 = cat.tempoCicloMaquina1 ?? cat.tempoCicloMaquina;
-        const total = (tHomem1 + tMaq1) + (p.quantidade > 1 ? (p.quantidade - 1) * (cat.tempoCicloHomem + cat.tempoCicloMaquina) : 0);
+        const total = tMaq1 + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloMaquina : 0);
         equipTimeNeeded.set(cat.equipamentoId, (equipTimeNeeded.get(cat.equipamentoId) ?? 0) + total);
       }
     });
@@ -68,22 +70,27 @@ export default function Planeamento() {
     return emergNames;
   };
 
-  const getDayHasOvertime = (dateStr: string): boolean => {
-    const prod = store.production.filter((p) => p.date === dateStr);
-    if (prod.length === 0) return false;
-    const ops = store.getOperatorsForDate(dateStr);
-    const sched = buildDailyGanttSchedule({
-      dateStr: normalizeDateKey(dateStr),
-      production: store.production,
-      categories: store.categories,
-      equipment: store.equipment,
-      operatorsForDate: ops,
-      tempOperators: store.tempOperators,
-      sequencingRules: store.sequencingRules,
-      lunchSafeCategories: store.lunchSafeCategories,
+  const monthOvertimeDays = useMemo(() => {
+    const result = new Map<string, boolean>();
+    days.forEach((day) => {
+      const dStr = format(day, "yyyy-MM-dd");
+      const prod = store.production.filter((p) => p.date === dStr);
+      if (prod.length === 0) { result.set(dStr, false); return; }
+      const ops = store.getOperatorsForDate(dStr);
+      const sched = buildDailyGanttSchedule({
+        dateStr: normalizeDateKey(dStr),
+        production: store.production,
+        categories: store.categories,
+        equipment: store.equipment,
+        operatorsForDate: ops,
+        tempOperators: store.tempOperators,
+        sequencingRules: store.sequencingRules,
+        lunchSafeCategories: store.lunchSafeCategories,
+      });
+      result.set(dStr, sched.hasOvertime);
     });
-    return sched.hasOvertime;
-  };
+    return result;
+  }, [days, store.production, store.categories, store.equipment, store.tempOperators, store.sequencingRules, store.lunchSafeCategories, store.getOperatorsForDate]);
 
   const taxaColor = (rate: number) => {
     if (rate > 100) return "bg-destructive text-destructive-foreground";
@@ -219,7 +226,7 @@ export default function Planeamento() {
             const cap = getDayCapacidade(dateStr);
             const taxa = getTaxaOcupacao(dateStr);
             const emergEquip = getDayEmergencyEquipment(dateStr);
-            const hasOvertime = getDayHasOvertime(dateStr);
+            const hasOvertime = monthOvertimeDays.get(dateStr) ?? false;
             const isSelected = selectedDate === dateStr;
             const isTodayDate = isToday(day);
             const hasItems = count > 0;
@@ -327,7 +334,7 @@ export default function Planeamento() {
                             <td className="px-3 py-1.5">{p.unidade || "-"}</td>
                             <td className="px-3 py-1.5">{cat?.nome || "-"}</td>
                             <td className="px-3 py-1.5">{eq?.nome || "-"}</td>
-                            <td className="px-3 py-1.5 text-right">{cat ? `${p.quantidade * cat.tempoCicloHomem} min` : "-"}</td>
+                            <td className="px-3 py-1.5 text-right">{cat ? `${Math.round((cat.tempoCicloHomem1 ?? cat.tempoCicloHomem) + (p.quantidade > 1 ? (p.quantidade - 1) * cat.tempoCicloHomem : 0))} min` : "-"}</td>
                             <td className="px-4 py-1.5 text-right">{cat ? `${p.quantidade * cat.tempoCicloMaquina} min` : "-"}</td>
                             <td className="px-2 py-1.5">
                               <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => store.deleteProduction(p.id)}>

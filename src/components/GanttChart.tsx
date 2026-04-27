@@ -126,8 +126,11 @@ function computeEffectiveMachineRows(
       let placed = false;
       for (const altLabel of altLabels) {
         const altTasks = rowTaskMap.get(altLabel) ?? [];
-        const lastAlt = altTasks[altTasks.length - 1];
-        if (!lastAlt || lastAlt.end <= displacedTask.start) {
+        // Check that the displaced task has no overlap with any task already in alt row
+        const hasOverlap = altTasks.some(
+          (t) => t.start < displacedTask.end && t.end > displacedTask.start,
+        );
+        if (!hasOverlap) {
           altTasks.push(displacedTask);
           altTasks.sort((a, b) => a.start - b.start);
           rowTaskMap.set(altLabel, altTasks);
@@ -135,14 +138,9 @@ function computeEffectiveMachineRows(
           break;
         }
       }
-      if (!placed && altLabels.length > 0) {
-        const leastBusy = altLabels.reduce((best, l) => {
-          const lastEnd = (rowTaskMap.get(l) ?? []).at(-1)?.end ?? 0;
-          const bestEnd = (rowTaskMap.get(best) ?? []).at(-1)?.end ?? 0;
-          return lastEnd < bestEnd ? l : best;
-        });
-        rowTaskMap.get(leastBusy)!.push(displacedTask);
-        rowTaskMap.get(leastBusy)!.sort((a, b) => a.start - b.start);
+      if (!placed) {
+        // No alt row has space — keep in original row (overlap visible rather than silently migrated)
+        resolved.push(displacedTask);
       }
     }
   }

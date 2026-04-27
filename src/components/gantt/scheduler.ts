@@ -303,6 +303,8 @@ interface MachineSlotTracker {
   dedicatedSlots: Map<string, number>;
   /** Preferred pair reuse for paired categories: key = `${categoryId}:${primaryEqId}:${pairedEqId}` */
   pairPreferences: Map<string, { primaryMachineIdx: number; pairedMachineIdx: number }>;
+  /** Machine instance preference per dish: key = `${artigo}:${equipmentId}`, value = machineIdx */
+  dishMachinePreferences: Map<string, number>;
 }
 
 function createMachineTracker(equipment: Equipment[], allowEmergency: boolean, emergencyEquipIds?: Set<string>): MachineSlotTracker {
@@ -314,7 +316,7 @@ function createMachineTracker(equipment: Equipment[], allowEmergency: boolean, e
     const count = useEmerg ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
     slots.set(eq.id, Array.from({ length: count }, () => DAY_START));
   });
-  return { slots, dedicatedSlots: new Map(), pairPreferences: new Map() };
+  return { slots, dedicatedSlots: new Map(), pairPreferences: new Map(), dishMachinePreferences: new Map() };
 }
 
 function cloneMachineTracker(tracker: MachineSlotTracker): MachineSlotTracker {
@@ -324,6 +326,7 @@ function cloneMachineTracker(tracker: MachineSlotTracker): MachineSlotTracker {
     slots,
     dedicatedSlots: new Map(tracker.dedicatedSlots),
     pairPreferences: new Map(tracker.pairPreferences),
+    dishMachinePreferences: new Map(tracker.dishMachinePreferences),
   };
 }
 
@@ -365,12 +368,13 @@ function findEarliestMachineSlot(
   allowEmergency: boolean,
   hardStop: number,
   categoryId?: string,
+  artigo?: string,
 ): { assignments: ScheduledMachineAssignment[]; phaseStart: number } | null {
   if (phaseBookings.some((booking) => booking.isPaired)) {
-    return findPairedMachineSlot(phaseBookings, minStart, tracker, equipmentMap, allowEmergency, hardStop, categoryId);
+    return findPairedMachineSlot(phaseBookings, minStart, tracker, equipmentMap, allowEmergency, hardStop, categoryId, artigo);
   }
 
-  return findStandardMachineSlot(phaseBookings, minStart, tracker, equipmentMap, allowEmergency, hardStop, categoryId);
+  return findStandardMachineSlot(phaseBookings, minStart, tracker, equipmentMap, allowEmergency, hardStop, categoryId, artigo);
 }
 
 function findStandardMachineSlot(
@@ -381,6 +385,7 @@ function findStandardMachineSlot(
   allowEmergency: boolean,
   hardStop: number,
   categoryId?: string,
+  artigo?: string,
 ): { assignments: ScheduledMachineAssignment[]; phaseStart: number } | null {
   // Group bookings by equipment
   const grouped = new Map<string, MachineBooking[]>();
@@ -420,9 +425,16 @@ function findStandardMachineSlot(
         slotPicks.push({ equipmentId: eqId, booking, machineIdx: existingDedicated });
       } else {
         // Get indices sorted by availability (earliest-free first), excluding reserved-by-others
-        const availableIndices = Array.from({ length: maxIdx }, (_, i) => i)
+        const baseIndices = Array.from({ length: maxIdx }, (_, i) => i)
           .filter(i => !reservedByOthers.has(`${eqId}:${i}`))
           .sort((a, b) => (slots[a] ?? DAY_START) - (slots[b] ?? DAY_START));
+
+        // Prefer the machine instance already used for this dish on this equipment
+        const dishPrefKey = artigo ? `${artigo}:${eqId}` : undefined;
+        const dishPrefIdx = dishPrefKey ? tracker.dishMachinePreferences.get(dishPrefKey) : undefined;
+        const availableIndices = dishPrefIdx !== undefined && baseIndices.includes(dishPrefIdx)
+          ? [dishPrefIdx, ...baseIndices.filter(i => i !== dishPrefIdx)]
+          : baseIndices;
 
         // Skip indices already picked
         const alreadyPicked = slotPicks.filter(p => p.equipmentId === eqId).map(p => p.machineIdx);
@@ -456,12 +468,13 @@ function findPairedMachineSlot(
   allowEmergency: boolean,
   hardStop: number,
   categoryId?: string,
+  artigo?: string,
 ): { assignments: ScheduledMachineAssignment[]; phaseStart: number } | null {
   const pairedBooking = phaseBookings.find((booking) => booking.isPaired);
   const primaryBooking = phaseBookings.find((booking) => !booking.isPaired);
 
   if (!pairedBooking || !primaryBooking) {
-    return findStandardMachineSlot(phaseBookings, minStart, tracker, equipmentMap, allowEmergency, hardStop, categoryId);
+    return findStandardMachineSlot(phaseBookings, minStart, tracker, equipmentMap, allowEmergency, hardStop, categoryId, artigo);
   }
 
   const remainingBookings = phaseBookings.filter((booking) => booking !== pairedBooking && booking !== primaryBooking);
@@ -498,6 +511,7 @@ function findPairedMachineSlot(
       allowEmergency,
       hardStop,
       categoryId,
+      artigo,
     );
 
     if (!remainingResult) {
@@ -873,20 +887,16 @@ function jointSchedule(
   }
 
   /** Register or update commitment when an operator is assigned a task.
-   *  Only creates commitments for non-multiOperador equipment. */
+   *  For all equipment: once an operator starts a dish, they finish all doses of it.
+   *  For multiOperador equipment the commitment is by artigo (other operators can use the same
+   *  machine for different dishes). For non-multiOperador it also enforces equipment-level lock. */
   function registerCommitment(opName: string, task: PlanningTask, pendingTasks: PlanningTask[]) {
-    const eq = equipmentMap.get(task.equipmentId);
-    const isMulti = eq?.multiOperador ?? true;
-    // Only commit for non-multiOperador equipment (task continuity on Fritadeira etc.)
-    if (!isMulti) {
-      const remaining = pendingTasks.filter(t => t.artigo === task.artigo).length;
-      if (remaining > 0) {
-        operatorCommitments.set(opName, { artigo: task.artigo, equipmentId: task.equipmentId, remaining });
-      } else {
-        operatorCommitments.delete(opName);
-      }
+    const remaining = pendingTasks.filter(t => t.artigo === task.artigo).length;
+    if (remaining > 0) {
+      operatorCommitments.set(opName, { artigo: task.artigo, equipmentId: task.equipmentId, remaining });
+    } else {
+      operatorCommitments.delete(opName);
     }
-    // For multiOperador equipment, no commitment — load balancing distributes freely
   }
 
   function tryScheduleAll(allowEmergency: boolean, tasksToSchedule: PlanningTask[]): PlanningTask[] {
@@ -898,6 +908,10 @@ function jointSchedule(
         const slots = tracker.slots.get(ma.booking.equipmentId);
         if (slots && slots[ma.machineIdx] < ma.end) {
           slots[ma.machineIdx] = ma.end;
+        }
+        const dishPrefKey = `${a.task.artigo}:${ma.booking.equipmentId}`;
+        if (!tracker.dishMachinePreferences.has(dishPrefKey)) {
+          tracker.dishMachinePreferences.set(dishPrefKey, ma.machineIdx);
         }
       }
 
@@ -1080,7 +1094,7 @@ function jointSchedule(
       const result = bestResult!;
       pending.splice(bestIdx, 1);
 
-      // Commit machine slots and register dedicated machines / preferred pairs
+      // Commit machine slots and register dedicated machines / preferred pairs / dish preferences
       for (const ma of result.machineAssignments) {
         const slots = tracker.slots.get(ma.booking.equipmentId);
         if (slots) slots[ma.machineIdx] = ma.end;
@@ -1089,6 +1103,11 @@ function jointSchedule(
           if (!tracker.dedicatedSlots.has(dedKey)) {
             tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
           }
+        }
+        // Register dish machine preference (first-come, first-served per artigo+equipment)
+        const dishPrefKey = `${task.artigo}:${ma.booking.equipmentId}`;
+        if (!tracker.dishMachinePreferences.has(dishPrefKey)) {
+          tracker.dishMachinePreferences.set(dishPrefKey, ma.machineIdx);
         }
       }
 
@@ -1199,6 +1218,10 @@ function jointSchedule(
           const slots = tracker.slots.get(ma.booking.equipmentId);
           if (slots && slots[ma.machineIdx] < ma.end) {
             slots[ma.machineIdx] = ma.end;
+          }
+          const dishPrefKey = `${a.task.artigo}:${ma.booking.equipmentId}`;
+          if (!tracker.dishMachinePreferences.has(dishPrefKey)) {
+            tracker.dishMachinePreferences.set(dishPrefKey, ma.machineIdx);
           }
         }
         const cookingA = a.machineAssignments.find((ma) => ma.pairRole === "cooking");
@@ -1333,6 +1356,10 @@ function jointSchedule(
             const dedKey = `${task.categoryId}:${ma.booking.equipmentId}:ded`;
             if (!tracker.dedicatedSlots.has(dedKey)) tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
           }
+          const dishPrefKey = `${task.artigo}:${ma.booking.equipmentId}`;
+          if (!tracker.dishMachinePreferences.has(dishPrefKey)) {
+            tracker.dishMachinePreferences.set(dishPrefKey, ma.machineIdx);
+          }
         }
         const cookingA = result.machineAssignments.find((ma) => ma.pairRole === "cooking");
         const coolingA = result.machineAssignments.find((ma) => ma.pairRole === "cooling");
@@ -1449,7 +1476,7 @@ function tryJointSlot(
 
   for (let iter = 0; iter < MAX_ITERATIONS && candidateTime < OPERATOR_HARD_STOP; iter++) {
     // Try to schedule all machine phases atomically starting at candidateTime
-    const machineResult = tryAllPhases(phases, candidateTime, tracker, equipmentMap, allowEmergency, task.categoryId);
+    const machineResult = tryAllPhases(phases, candidateTime, tracker, equipmentMap, allowEmergency, task.categoryId, task.artigo);
     if (!machineResult) {
       // No machine slot available at all
       candidateTime += 5;
@@ -1471,8 +1498,15 @@ function tryJointSlot(
       // Check if the operator's work portion (not the full machine duration) crosses lunch
       const operatorEndIfStartedNow = machineStart + task.operatorDuration;
       if (machineStart < lunchBlockStart && operatorEndIfStartedNow > lunchBlockStart) {
-        // Operator T.Homem would cross into lunch — push to after lunch
-        candidateTime = lunchBlockEnd;
+        // T.Homem would cross noon. Try scheduling at preLunchStart where operator ends exactly
+        // at noon — only viable if machine is already free before preLunchStart.
+        const preLunchStart = lunchBlockStart - task.operatorDuration;
+        if (machineStart < preLunchStart && preLunchStart >= Math.max(OPERATOR_START, candidateTime)) {
+          candidateTime = preLunchStart;
+        } else {
+          // Machine only free after preLunchStart — post-lunch is the only option
+          candidateTime = lunchBlockEnd;
+        }
         continue;
       }
     }
@@ -1588,6 +1622,7 @@ function tryAllPhases(
   equipmentMap: Map<string, Equipment>,
   allowEmergency: boolean,
   categoryId?: string,
+  artigo?: string,
 ): { allAssignments: ScheduledMachineAssignment[]; overallStart: number } | null {
   // Clone tracker for speculative scheduling
   const specTracker = cloneMachineTracker(tracker);
@@ -1597,10 +1632,10 @@ function tryAllPhases(
   let overallStart = Infinity;
 
   for (const phaseBookings of phases) {
-    const result = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, MACHINE_TARGET_STOP, categoryId);
+    const result = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, MACHINE_TARGET_STOP, categoryId, artigo);
     if (!result) {
       // Try with overflow allowed (past hard stop)
-      const overflowResult = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, Infinity, categoryId);
+      const overflowResult = findEarliestMachineSlot(phaseBookings, phaseCursor, specTracker, equipmentMap, allowEmergency, Infinity, categoryId, artigo);
       if (!overflowResult) return null;
       // Mark as overflow but still return
       for (const a of overflowResult.assignments) {
@@ -2205,7 +2240,7 @@ export function buildDailyGanttSchedule({
     cursor: OPERATOR_START,
     totalWorked: 0,
     hadLunch: false,
-    lunchStart: result.assignments.length > 0 ? Math.min(...result.assignments.map(() => LUNCH_WINDOW_START)) : LUNCH_WINDOW_START,
+    lunchStart: LUNCH_WINDOW_START,
     lunchEnd: LUNCH_WINDOW_START + LUNCH_DURATION_MIN,
   }));
 
