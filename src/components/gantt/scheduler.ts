@@ -457,12 +457,26 @@ function findStandardMachineSlot(
           .filter(i => !reservedByOthers.has(`${eqId}:${i}`))
           .sort((a, b) => (slots[a] ?? DAY_START) - (slots[b] ?? DAY_START));
 
-        // Prefer the machine instance already used for this dish on this equipment
+        // Soft dish-machine preference: keep doses of the same dish on the same machine to avoid
+        // jumping between Basculantes per dose. BUT yield the preference to a truly idle machine
+        // (free at minStart) so a second machine can join the same dish in parallel and accelerate
+        // production. The preferred machine is therefore used only when:
+        //   (a) the preferred machine is itself free at/before minStart, OR
+        //   (b) no other machine in this equipment group is free at minStart (no parallelism gain).
         const dishPrefKey = artigo ? `${artigo}:${eqId}` : undefined;
         const dishPrefIdx = dishPrefKey ? tracker.dishMachinePreferences.get(dishPrefKey) : undefined;
-        const availableIndices = dishPrefIdx !== undefined && baseIndices.includes(dishPrefIdx)
-          ? [dishPrefIdx, ...baseIndices.filter(i => i !== dishPrefIdx)]
-          : baseIndices;
+        let availableIndices = baseIndices;
+        if (dishPrefIdx !== undefined && baseIndices.includes(dishPrefIdx)) {
+          const preferredTime = slots[dishPrefIdx] ?? DAY_START;
+          const hasIdleAlternative = baseIndices.some(
+            (i) => i !== dishPrefIdx && (slots[i] ?? DAY_START) <= minStart,
+          );
+          const useDishPref = preferredTime <= minStart || !hasIdleAlternative;
+          if (useDishPref) {
+            availableIndices = [dishPrefIdx, ...baseIndices.filter((i) => i !== dishPrefIdx)];
+          }
+          // else: fall through to baseIndices (earliest-free) so the idle machine joins the dish
+        }
 
         // Skip indices already picked
         const alreadyPicked = slotPicks.filter(p => p.equipmentId === eqId).map(p => p.machineIdx);
@@ -915,16 +929,22 @@ function jointSchedule(
   }
 
   /** Register or update commitment when an operator is assigned a task.
-   *  For all equipment: once an operator starts a dish, they finish all doses of it.
-   *  For multiOperador equipment the commitment is by artigo (other operators can use the same
-   *  machine for different dishes). For non-multiOperador it also enforces equipment-level lock. */
+   *  Only creates commitments for non-multiOperador equipment (e.g. Fritadeira), which
+   *  enforces a single operator for the whole equipment group. For multiOperador equipment
+   *  (Basculante, Forno, Marmita) load balancing distributes doses freely between operators —
+   *  multiple operators may work on the same dish in parallel to maximise throughput. */
   function registerCommitment(opName: string, task: PlanningTask, pendingTasks: PlanningTask[]) {
-    const remaining = pendingTasks.filter(t => t.artigo === task.artigo).length;
-    if (remaining > 0) {
-      operatorCommitments.set(opName, { artigo: task.artigo, equipmentId: task.equipmentId, remaining });
-    } else {
-      operatorCommitments.delete(opName);
+    const eq = equipmentMap.get(task.equipmentId);
+    const isMulti = eq?.multiOperador ?? true;
+    if (!isMulti) {
+      const remaining = pendingTasks.filter(t => t.artigo === task.artigo).length;
+      if (remaining > 0) {
+        operatorCommitments.set(opName, { artigo: task.artigo, equipmentId: task.equipmentId, remaining });
+      } else {
+        operatorCommitments.delete(opName);
+      }
     }
+    // For multiOperador equipment, no commitment — load balancing distributes freely.
   }
 
   function tryScheduleAll(allowEmergency: boolean, tasksToSchedule: PlanningTask[]): PlanningTask[] {
