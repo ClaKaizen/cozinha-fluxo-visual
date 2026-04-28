@@ -117,14 +117,6 @@ export function applyOverrides(
   overrides: ManualOverride,
   operatorLunchBreaks: Record<string, OperatorLunchBreak> = {},
 ): GanttRow<OperatorTask>[] {
-  // Anchor = start of first task in original row (before override)
-  const anchorByRow = new Map<string, number>();
-  for (const row of originalRows) {
-    if (row.tasks.length > 0) {
-      anchorByRow.set(row.label, row.tasks[0].start);
-    }
-  }
-
   // Build a flat pool of all tasks
   const allTasks = new Map<string, OperatorTask>();
   for (const row of originalRows) {
@@ -135,7 +127,6 @@ export function applyOverrides(
 
   // Build assignment map: taskId → operatorLabel from overrides
   const taskToOperator = new Map<string, string>();
-  // Also preserve order from override arrays
   const orderInTarget = new Map<string, number>();
   for (const [opLabel, taskIds] of Object.entries(overrides)) {
     taskIds.forEach((tid, idx) => {
@@ -144,7 +135,7 @@ export function applyOverrides(
     });
   }
 
-  // For tasks NOT in any override, keep original assignment
+  // For tasks NOT in any override, keep original assignment + original-order index
   for (const row of originalRows) {
     row.tasks.forEach((task, idx) => {
       if (!taskToOperator.has(task.id)) {
@@ -156,63 +147,141 @@ export function applyOverrides(
 
   const hasOverrides = Object.keys(overrides).length > 0;
 
-  // Rebuild rows
-  return originalRows.map((row) => {
-    const assignedTasks = Array.from(allTasks.values()).filter(
-      (t) => taskToOperator.get(t.id) === row.label,
-    );
+  if (!hasOverrides) {
+    // No overrides → return original ordering & timing untouched
+    return originalRows.map((row) => ({
+      ...row,
+      tasks: row.tasks
+        .map((t) => ({ ...t, operatorName: row.label }))
+        .sort((a, b) => a.start - b.start),
+    }));
+  }
 
-    if (!hasOverrides) {
-      // No overrides → return original ordering & timing untouched
-      return {
-        ...row,
-        tasks: assignedTasks
-          .map((t) => ({ ...t, operatorName: row.label }))
-          .sort((a, b) => a.start - b.start),
-      };
-    }
-
-    // Sort by override-defined order
-    assignedTasks.sort((a, b) => {
+  // ── Priority-queue simulation ──
+  // Goal: respect both operator order (per overrides) AND machine availability (cursor per
+  // machineLabel). At each step, advance the operator whose next task can start earliest.
+  // This prevents two doses landing on the same machine slot — the root cause of the
+  // visible overlap after a swap/drag-drop.
+  const operatorSequences = new Map<string, OperatorTask[]>();
+  for (const row of originalRows) {
+    operatorSequences.set(row.label, []);
+  }
+  for (const task of allTasks.values()) {
+    const op = taskToOperator.get(task.id);
+    if (!op) continue;
+    const seq = operatorSequences.get(op);
+    if (seq) seq.push(task);
+  }
+  for (const seq of operatorSequences.values()) {
+    seq.sort((a, b) => {
       const oa = orderInTarget.get(a.id) ?? 0;
       const ob = orderInTarget.get(b.id) ?? 0;
       return oa - ob;
     });
+  }
 
-    // Recalculate start/end/segments sequentially from anchor
-    const lunch = operatorLunchBreaks[row.label];
-    const lunchStart = lunch?.start ?? Number.POSITIVE_INFINITY;
-    const lunchEnd = lunch?.end ?? Number.POSITIVE_INFINITY;
-    // With overrides, operator may receive tasks that originally started earlier than the
-    // operator's own first task. Anchor must reflect the real earliest start of the assigned
-    // tasks, otherwise rebuild may push tasks into the wrong slot relative to lunch.
-    const anchor = assignedTasks.length > 0
-      ? Math.max(DAY_START, Math.min(...assignedTasks.map((t) => t.start)))
-      : (anchorByRow.get(row.label) ?? DAY_START);
+  const operatorCursor = new Map<string, number>();
+  const machineCursor = new Map<string, number>();
+  const nextIndex = new Map<string, number>();
+  for (const op of operatorSequences.keys()) {
+    operatorCursor.set(op, DAY_START);
+    nextIndex.set(op, 0);
+  }
 
-    let cursor = anchor;
-    const recalculated: OperatorTask[] = assignedTasks.map((t) => {
-      const dur = t.operatorDuration ?? 0;
-      const built = rebuildOperatorSegments(cursor, dur, lunchStart, lunchEnd);
-      cursor = built.end;
-      return {
-        ...t,
-        operatorName: row.label,
-        start: built.start,
-        end: built.end,
-        segments: built.segments,
-      };
-    });
+  // Apply mandatory + personal lunch constraints to a candidate start time.
+  // T.Homem must be entirely outside the lunch windows (push start past lunchEnd if it would cross).
+  const applyLunchConstraint = (start: number, duration: number, opLabel: string): number => {
+    let s = start;
+    // Mandatory operator lunch [12:00, 13:00] — applies to every operator
+    if (s < MANDATORY_LUNCH_START && s + duration > MANDATORY_LUNCH_START) {
+      s = MANDATORY_LUNCH_END;
+    } else if (s >= MANDATORY_LUNCH_START && s < MANDATORY_LUNCH_END) {
+      s = MANDATORY_LUNCH_END;
+    }
+    // Personal lunch (only meaningful if shifted later than the mandatory one)
+    const lunch = operatorLunchBreaks[opLabel];
+    if (lunch && Number.isFinite(lunch.start) && Number.isFinite(lunch.end) && lunch.end > lunch.start) {
+      if (s < lunch.start && s + duration > lunch.start) {
+        s = lunch.end;
+      } else if (s >= lunch.start && s < lunch.end) {
+        s = lunch.end;
+      }
+    }
+    return s;
+  };
 
-    if (isDev && recalculated.some((t) => t.end > OPERATOR_HARD_STOP)) {
-      const overflows = recalculated
-        .filter((t) => t.end > OPERATOR_HARD_STOP)
-        .map((t) => `${t.doseLabel} → ${formatClock(t.end)}`);
-      console.warn(`[Override] ${row.label}: tarefas após 15:30 →`, overflows);
+  const updatedTasks = new Map<string, OperatorTask>();
+
+  // Drain all sequences; each iteration commits exactly one task across all operators.
+  while (true) {
+    let pickOp: string | null = null;
+    let pickTask: OperatorTask | null = null;
+    let pickStart = Number.POSITIVE_INFINITY;
+
+    for (const [op, seq] of operatorSequences) {
+      const idx = nextIndex.get(op) ?? 0;
+      if (idx >= seq.length) continue;
+      const task = seq[idx];
+
+      const opC = operatorCursor.get(op) ?? DAY_START;
+      const mC = machineCursor.get(task.machineLabel) ?? DAY_START;
+      const naive = Math.max(DAY_START, opC, mC);
+      const start = applyLunchConstraint(naive, task.operatorDuration ?? 0, op);
+
+      if (start < pickStart) {
+        pickStart = start;
+        pickOp = op;
+        pickTask = task;
+      }
     }
 
-    return { ...row, tasks: recalculated };
+    if (!pickOp || !pickTask) break;
+
+    const opDur = pickTask.operatorDuration ?? 0;
+    const machineDur = pickTask.machineDuration ?? 0;
+    const opEnd = pickStart + opDur;
+    const machineEnd = pickStart + machineDur;
+
+    operatorCursor.set(pickOp, opEnd);
+    machineCursor.set(pickTask.machineLabel, machineEnd);
+
+    const lunch = operatorLunchBreaks[pickOp];
+    const lunchStart = lunch?.start ?? Number.POSITIVE_INFINITY;
+    const lunchEnd = lunch?.end ?? Number.POSITIVE_INFINITY;
+    const built = rebuildOperatorSegments(pickStart, opDur, lunchStart, lunchEnd);
+
+    updatedTasks.set(pickTask.id, {
+      ...pickTask,
+      operatorName: pickOp,
+      start: built.start,
+      end: built.end,
+      segments: built.segments,
+    });
+
+    nextIndex.set(pickOp, (nextIndex.get(pickOp) ?? 0) + 1);
+  }
+
+  // Reassemble rows in their original order, with each row's tasks sorted by new start
+  const result = originalRows.map((row) => {
+    const tasksForRow = Array.from(updatedTasks.values())
+      .filter((t) => taskToOperator.get(t.id) === row.label)
+      .sort((a, b) => a.start - b.start);
+    return { ...row, tasks: tasksForRow };
   });
+
+  if (isDev) {
+    for (const row of result) {
+      const overflows = row.tasks.filter((t) => t.end > OPERATOR_HARD_STOP);
+      if (overflows.length > 0) {
+        console.warn(
+          `[Override] ${row.label}: tarefas após 15:30 →`,
+          overflows.map((t) => `${t.doseLabel} → ${formatClock(t.end)}`),
+        );
+      }
+    }
+  }
+
+  return result;
 }
 
 // ── Check if a task can be moved to another operator ────
