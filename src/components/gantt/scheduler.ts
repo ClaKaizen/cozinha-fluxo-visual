@@ -200,11 +200,11 @@ function operatorIsFreeAt(op: OperatorState, start: number, duration: number): b
  * Get the earliest time an operator can start a task of given duration.
  * Returns the start time or -1 if impossible.
  *
- * `isLunchSafe = false` (default) additionally blocks the mandatory [12:00, 13:00] window
- * regardless of the operator's personal lunch state. Lunch-safe categories may be confectioned
- * during this period, so they pass `true` to relax the block.
+ * The mandatory lunch window [12:00, 13:00] is always enforced — operators must always go to
+ * lunch in that window, regardless of whether the *dish* is lunch-safe. Only the *machine* is
+ * allowed to run through lunch for lunch-safe dishes (handled in tryJointSlot).
  */
-function getOperatorEarliestStart(op: OperatorState, minStart: number, duration: number, isLunchSafe: boolean = false): number {
+function getOperatorEarliestStart(op: OperatorState, minStart: number, duration: number): number {
   if (op.totalWorked + duration > OPERATOR_PRODUCTIVE_MINUTES) return -1;
 
   let effectiveStart = Math.max(op.cursor, minStart);
@@ -214,11 +214,9 @@ function getOperatorEarliestStart(op: OperatorState, minStart: number, duration:
     if (effectiveStart < LUNCH_WINDOW_START) {
       const taskEnd = effectiveStart + duration;
       if (taskEnd > LUNCH_WINDOW_START) {
-        // Task would cross 12:00 — eat lunch at 12:00 first
         effectiveStart = sharedLunchEnd;
       }
     } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < sharedLunchEnd) {
-      // In the shared lunch hour — skip to end
       effectiveStart = sharedLunchEnd;
     }
   } else {
@@ -227,15 +225,12 @@ function getOperatorEarliestStart(op: OperatorState, minStart: number, duration:
     }
   }
 
-  // Additional mandatory lunch enforcement for non-lunchSafe categories: the operator may
-  // never be considered available during 12:00–13:00, even if their personal lunch is shifted
-  // (e.g. lunchStart = 12:30 leaves 12:00–12:30 visible to the personal-lunch check).
-  if (!isLunchSafe) {
-    if (effectiveStart < LUNCH_WINDOW_START && effectiveStart + duration > LUNCH_WINDOW_START) {
-      effectiveStart = sharedLunchEnd;
-    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < sharedLunchEnd) {
-      effectiveStart = sharedLunchEnd;
-    }
+  // Mandatory [12:00, 13:00] enforcement — covers any case where the personal-lunch check
+  // above didn't capture it (e.g. shifted personal lunchStart, hadLunch already true).
+  if (effectiveStart < LUNCH_WINDOW_START && effectiveStart + duration > LUNCH_WINDOW_START) {
+    effectiveStart = sharedLunchEnd;
+  } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < sharedLunchEnd) {
+    effectiveStart = sharedLunchEnd;
   }
 
   if (effectiveStart + duration > OPERATOR_HARD_STOP) return -1;
@@ -244,11 +239,9 @@ function getOperatorEarliestStart(op: OperatorState, minStart: number, duration:
 
 /**
  * Commit an operator to a task: update cursor, worked time, and handle lunch.
- *
- * `isLunchSafe = false` (default) additionally enforces the mandatory [12:00, 13:00] window
- * for non-lunch-safe tasks, mirroring `getOperatorEarliestStart`.
+ * Mandatory [12:00, 13:00] block is always enforced — see getOperatorEarliestStart.
  */
-function commitOperator(op: OperatorState, taskStart: number, duration: number, isLunchSafe: boolean = false): { opStart: number; opEnd: number } {
+function commitOperator(op: OperatorState, taskStart: number, duration: number): { opStart: number; opEnd: number } {
   let effectiveStart = Math.max(op.cursor, taskStart);
   const sharedLunchStart = op.lunchStart;
   const sharedLunchEnd = sharedLunchStart + LUNCH_DURATION_MIN;
@@ -275,13 +268,11 @@ function commitOperator(op: OperatorState, taskStart: number, duration: number, 
     }
   }
 
-  // Mandatory 12:00–13:00 enforcement for non-lunchSafe tasks (matches getOperatorEarliestStart).
-  if (!isLunchSafe) {
-    if (effectiveStart < LUNCH_WINDOW_START && effectiveStart + duration > LUNCH_WINDOW_START) {
-      effectiveStart = mandatoryLunchEnd;
-    } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < mandatoryLunchEnd) {
-      effectiveStart = mandatoryLunchEnd;
-    }
+  // Mandatory 12:00–13:00 enforcement (mirrors getOperatorEarliestStart)
+  if (effectiveStart < LUNCH_WINDOW_START && effectiveStart + duration > LUNCH_WINDOW_START) {
+    effectiveStart = mandatoryLunchEnd;
+  } else if (effectiveStart >= LUNCH_WINDOW_START && effectiveStart < mandatoryLunchEnd) {
+    effectiveStart = mandatoryLunchEnd;
   }
 
   const opEnd = effectiveStart + duration;
@@ -331,8 +322,13 @@ interface MachineSlotTracker {
   dedicatedSlots: Map<string, number>;
   /** Preferred pair reuse for paired categories: key = `${categoryId}:${primaryEqId}:${pairedEqId}` */
   pairPreferences: Map<string, { primaryMachineIdx: number; pairedMachineIdx: number }>;
-  /** Machine instance preference per dish: key = `${artigo}:${equipmentId}`, value = machineIdx */
-  dishMachinePreferences: Map<string, number>;
+  /** Hard no-zigzag commitment: which dish each machine instance is currently bound to.
+   *  Key = `${equipmentId}:${machineIdx}`, value = artigo. A machine cannot pick up another
+   *  dish while its current dish still has remaining unscheduled doses. */
+  machineCurrentDish: Map<string, string>;
+  /** Remaining unscheduled dose count per artigo. Drives the "machine released" rule:
+   *  a machine whose currentDish has remaining = 0 becomes free for any other dish. */
+  remainingDosesByArtigo: Map<string, number>;
 }
 
 function createMachineTracker(equipment: Equipment[], allowEmergency: boolean, emergencyEquipIds?: Set<string>): MachineSlotTracker {
@@ -344,7 +340,13 @@ function createMachineTracker(equipment: Equipment[], allowEmergency: boolean, e
     const count = useEmerg ? eq.quantidade + eq.quantidadeEmergencia : eq.quantidade;
     slots.set(eq.id, Array.from({ length: count }, () => DAY_START));
   });
-  return { slots, dedicatedSlots: new Map(), pairPreferences: new Map(), dishMachinePreferences: new Map() };
+  return {
+    slots,
+    dedicatedSlots: new Map(),
+    pairPreferences: new Map(),
+    machineCurrentDish: new Map(),
+    remainingDosesByArtigo: new Map(),
+  };
 }
 
 function cloneMachineTracker(tracker: MachineSlotTracker): MachineSlotTracker {
@@ -354,7 +356,8 @@ function cloneMachineTracker(tracker: MachineSlotTracker): MachineSlotTracker {
     slots,
     dedicatedSlots: new Map(tracker.dedicatedSlots),
     pairPreferences: new Map(tracker.pairPreferences),
-    dishMachinePreferences: new Map(tracker.dishMachinePreferences),
+    machineCurrentDish: new Map(tracker.machineCurrentDish),
+    remainingDosesByArtigo: new Map(tracker.remainingDosesByArtigo),
   };
 }
 
@@ -452,31 +455,24 @@ function findStandardMachineSlot(
         if (slotAvail > phaseStart) phaseStart = slotAvail;
         slotPicks.push({ equipmentId: eqId, booking, machineIdx: existingDedicated });
       } else {
-        // Get indices sorted by availability (earliest-free first), excluding reserved-by-others
-        const baseIndices = Array.from({ length: maxIdx }, (_, i) => i)
-          .filter(i => !reservedByOthers.has(`${eqId}:${i}`))
-          .sort((a, b) => (slots[a] ?? DAY_START) - (slots[b] ?? DAY_START));
+        // No-zigzag eligibility: machine M is eligible for dish D iff its currentDish is
+        // unset, equals D, or its previous dish is fully scheduled (remaining = 0).
+        // This both forbids interleaving (F → L → F on the same machine) and allows multiple
+        // machines to work on the same dish in parallel until that dish is exhausted globally.
+        const isEligibleForDish = (idx: number): boolean => {
+          if (!artigo) return true;
+          const machineKey = `${eqId}:${idx}`;
+          const current = tracker.machineCurrentDish.get(machineKey);
+          if (current === undefined) return true;
+          if (current === artigo) return true;
+          return (tracker.remainingDosesByArtigo.get(current) ?? 0) === 0;
+        };
 
-        // Soft dish-machine preference: keep doses of the same dish on the same machine to avoid
-        // jumping between Basculantes per dose. BUT yield the preference to a truly idle machine
-        // (free at minStart) so a second machine can join the same dish in parallel and accelerate
-        // production. The preferred machine is therefore used only when:
-        //   (a) the preferred machine is itself free at/before minStart, OR
-        //   (b) no other machine in this equipment group is free at minStart (no parallelism gain).
-        const dishPrefKey = artigo ? `${artigo}:${eqId}` : undefined;
-        const dishPrefIdx = dishPrefKey ? tracker.dishMachinePreferences.get(dishPrefKey) : undefined;
-        let availableIndices = baseIndices;
-        if (dishPrefIdx !== undefined && baseIndices.includes(dishPrefIdx)) {
-          const preferredTime = slots[dishPrefIdx] ?? DAY_START;
-          const hasIdleAlternative = baseIndices.some(
-            (i) => i !== dishPrefIdx && (slots[i] ?? DAY_START) <= minStart,
-          );
-          const useDishPref = preferredTime <= minStart || !hasIdleAlternative;
-          if (useDishPref) {
-            availableIndices = [dishPrefIdx, ...baseIndices.filter((i) => i !== dishPrefIdx)];
-          }
-          // else: fall through to baseIndices (earliest-free) so the idle machine joins the dish
-        }
+        // Get eligible indices sorted by availability (earliest-free first)
+        const availableIndices = Array.from({ length: maxIdx }, (_, i) => i)
+          .filter(i => !reservedByOthers.has(`${eqId}:${i}`))
+          .filter(i => isEligibleForDish(i))
+          .sort((a, b) => (slots[a] ?? DAY_START) - (slots[b] ?? DAY_START));
 
         // Skip indices already picked
         const alreadyPicked = slotPicks.filter(p => p.equipmentId === eqId).map(p => p.machineIdx);
@@ -950,17 +946,19 @@ function jointSchedule(
   function tryScheduleAll(allowEmergency: boolean, tasksToSchedule: PlanningTask[]): PlanningTask[] {
     const tracker = createMachineTracker(equipment, allowEmergency);
 
-    // Restore machine slots from already-committed assignments
+    // Initialize remaining-doses count for the no-zigzag rule (one entry per artigo)
+    for (const t of tasksToSchedule) {
+      tracker.remainingDosesByArtigo.set(t.artigo, (tracker.remainingDosesByArtigo.get(t.artigo) ?? 0) + 1);
+    }
+
+    // Restore machine slots and current-dish bindings from already-committed assignments
     for (const a of assignments) {
       for (const ma of a.machineAssignments) {
         const slots = tracker.slots.get(ma.booking.equipmentId);
         if (slots && slots[ma.machineIdx] < ma.end) {
           slots[ma.machineIdx] = ma.end;
         }
-        const dishPrefKey = `${a.task.artigo}:${ma.booking.equipmentId}`;
-        if (!tracker.dishMachinePreferences.has(dishPrefKey)) {
-          tracker.dishMachinePreferences.set(dishPrefKey, ma.machineIdx);
-        }
+        tracker.machineCurrentDish.set(`${ma.booking.equipmentId}:${ma.machineIdx}`, a.task.artigo);
       }
 
       const cookingAssignment = a.machineAssignments.find((ma) => ma.pairRole === "cooking");
@@ -1142,7 +1140,7 @@ function jointSchedule(
       const result = bestResult!;
       pending.splice(bestIdx, 1);
 
-      // Commit machine slots and register dedicated machines / preferred pairs / dish preferences
+      // Commit machine slots, dedicated reservations, and machine→dish bindings
       for (const ma of result.machineAssignments) {
         const slots = tracker.slots.get(ma.booking.equipmentId);
         if (slots) slots[ma.machineIdx] = ma.end;
@@ -1152,12 +1150,12 @@ function jointSchedule(
             tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
           }
         }
-        // Register dish machine preference (first-come, first-served per artigo+equipment)
-        const dishPrefKey = `${task.artigo}:${ma.booking.equipmentId}`;
-        if (!tracker.dishMachinePreferences.has(dishPrefKey)) {
-          tracker.dishMachinePreferences.set(dishPrefKey, ma.machineIdx);
-        }
+        // No-zigzag: this machine instance is now bound to this dish until the dish is exhausted
+        tracker.machineCurrentDish.set(`${ma.booking.equipmentId}:${ma.machineIdx}`, task.artigo);
       }
+      // Decrement remaining-doses count for this artigo (used by the no-zigzag eligibility check)
+      const remainingForArtigo = tracker.remainingDosesByArtigo.get(task.artigo) ?? 0;
+      tracker.remainingDosesByArtigo.set(task.artigo, Math.max(0, remainingForArtigo - 1));
 
       const cookingAssignment = result.machineAssignments.find((ma) => ma.pairRole === "cooking");
       const coolingAssignment = result.machineAssignments.find((ma) => ma.pairRole === "cooling");
@@ -1174,8 +1172,7 @@ function jointSchedule(
       // Commit operator and register continuity
       if (result.operatorName && task.operatorDuration > 0) {
         const op = operators.find((o) => o.name === result.operatorName)!;
-        const taskIsLunchSafe = lunchSafeCategories.includes(task.categoryId);
-        if (op) commitOperator(op, result.operatorStart, task.operatorDuration, taskIsLunchSafe);
+        if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
         registerGroupOperator(task.equipmentId, result.operatorName);
         registerCommitment(result.operatorName, task, pending);
       }
@@ -1261,17 +1258,19 @@ function jointSchedule(
     function tryScheduleAllPerType(tasksToSchedule: PlanningTask[]): PlanningTask[] {
       const tracker = createMachineTracker(equipment, false, emergencyEligible);
 
-      // Restore machine slots from already-committed assignments
+      // Initialize remaining-doses count for the no-zigzag rule
+      for (const t of tasksToSchedule) {
+        tracker.remainingDosesByArtigo.set(t.artigo, (tracker.remainingDosesByArtigo.get(t.artigo) ?? 0) + 1);
+      }
+
+      // Restore machine slots and current-dish bindings from already-committed assignments
       for (const a of assignments) {
         for (const ma of a.machineAssignments) {
           const slots = tracker.slots.get(ma.booking.equipmentId);
           if (slots && slots[ma.machineIdx] < ma.end) {
             slots[ma.machineIdx] = ma.end;
           }
-          const dishPrefKey = `${a.task.artigo}:${ma.booking.equipmentId}`;
-          if (!tracker.dishMachinePreferences.has(dishPrefKey)) {
-            tracker.dishMachinePreferences.set(dishPrefKey, ma.machineIdx);
-          }
+          tracker.machineCurrentDish.set(`${ma.booking.equipmentId}:${ma.machineIdx}`, a.task.artigo);
         }
         const cookingA = a.machineAssignments.find((ma) => ma.pairRole === "cooking");
         const coolingA = a.machineAssignments.find((ma) => ma.pairRole === "cooling");
@@ -1405,11 +1404,10 @@ function jointSchedule(
             const dedKey = `${task.categoryId}:${ma.booking.equipmentId}:ded`;
             if (!tracker.dedicatedSlots.has(dedKey)) tracker.dedicatedSlots.set(dedKey, ma.machineIdx);
           }
-          const dishPrefKey = `${task.artigo}:${ma.booking.equipmentId}`;
-          if (!tracker.dishMachinePreferences.has(dishPrefKey)) {
-            tracker.dishMachinePreferences.set(dishPrefKey, ma.machineIdx);
-          }
+          tracker.machineCurrentDish.set(`${ma.booking.equipmentId}:${ma.machineIdx}`, task.artigo);
         }
+        const remainingForArtigo = tracker.remainingDosesByArtigo.get(task.artigo) ?? 0;
+        tracker.remainingDosesByArtigo.set(task.artigo, Math.max(0, remainingForArtigo - 1));
         const cookingA = result.machineAssignments.find((ma) => ma.pairRole === "cooking");
         const coolingA = result.machineAssignments.find((ma) => ma.pairRole === "cooling");
         if (cookingA && coolingA) {
@@ -1420,8 +1418,7 @@ function jointSchedule(
         }
         if (result.operatorName && task.operatorDuration > 0) {
           const op = operators.find((o) => o.name === result.operatorName)!;
-          const taskIsLunchSafe = lunchSafeCategories.includes(task.categoryId);
-          if (op) commitOperator(op, result.operatorStart, task.operatorDuration, taskIsLunchSafe);
+          if (op) commitOperator(op, result.operatorStart, task.operatorDuration);
           registerGroupOperator(task.equipmentId, result.operatorName);
           registerCommitment(result.operatorName, task, pending);
         }
@@ -1477,8 +1474,7 @@ function jointSchedule(
       for (const a of sorted) {
         if (a.operatorName && a.task.operatorDuration > 0) {
           const op = operators.find((o) => o.name === a.operatorName);
-          const taskIsLunchSafe = lunchSafeCategories.includes(a.task.categoryId);
-          if (op) commitOperator(op, a.operatorStart, a.task.operatorDuration, taskIsLunchSafe);
+          if (op) commitOperator(op, a.operatorStart, a.task.operatorDuration);
         }
       }
     }
@@ -1598,26 +1594,17 @@ function tryJointSlot(
     // Check if machine start is past hard stop
     if (machineStart >= MACHINE_TARGET_STOP) break;
 
-    // Lunch constraint: only block if the OPERATOR's T.Homem would cross lunch.
-    // The machine can run autonomously during lunch once T.Homem is done.
-    // Use the real operator earliest start (not machineStart) — the operator may only become
-    // available later than the machine, so the crossing must be evaluated from when T.Homem
-    // would actually start. If it crosses noon, jump exactly to the end of the mandatory
-    // lunch window and let the next iteration find the first free machine from there.
-    if (!isLunchSafe && task.operatorDuration > 0) {
-      let bestOpEarliestStart = Number.POSITIVE_INFINITY;
-      for (const op of operators) {
-        if (excludedOperators.has(op.name)) continue;
-        if (strictPreferred && preferredOperator && op.name !== preferredOperator) continue;
-        const s = getOperatorEarliestStart(op, machineStart, task.operatorDuration, false);
-        if (s >= 0 && s < bestOpEarliestStart) bestOpEarliestStart = s;
-      }
-      const effectiveOpStart = Number.isFinite(bestOpEarliestStart) ? bestOpEarliestStart : machineStart;
-      const operatorEndIfStarted = effectiveOpStart + task.operatorDuration;
-
-      if (effectiveOpStart < LUNCH_WINDOW_START && operatorEndIfStarted > LUNCH_WINDOW_START) {
-        // T.Homem would cross noon → schedule immediately after the mandatory lunch window
-        candidateTime = LUNCH_WINDOW_START + LUNCH_DURATION_MIN;
+    // Lunch constraints:
+    //   • T.Homem is *always* blocked during [12:00, 13:00] — operator goes to lunch regardless
+    //     of dish type. This is enforced by getOperatorEarliestStart (and re-checked when the
+    //     operator's earliest start would push past noon, advancing candidateTime).
+    //   • For non-lunch-safe dishes, T.Máquina must also be entirely outside [12:00, 13:00].
+    //     If the machine span overlaps the lunch window even by a minute, we push to 13:00.
+    if (!isLunchSafe) {
+      const lunchStart = LUNCH_WINDOW_START;
+      const lunchEnd = LUNCH_WINDOW_START + LUNCH_DURATION_MIN;
+      if (machineStart < lunchEnd && machineEnd > lunchStart) {
+        candidateTime = lunchEnd;
         continue;
       }
     }
@@ -1642,7 +1629,7 @@ function tryJointSlot(
     if (preferredOperator) {
       const prefOp = operators.find(o => o.name === preferredOperator);
       if (prefOp) {
-        const opStart = getOperatorEarliestStart(prefOp, machineStart, task.operatorDuration, isLunchSafe);
+        const opStart = getOperatorEarliestStart(prefOp, machineStart, task.operatorDuration);
         if (opStart >= 0) {
           // HARD CONSTRAINT: machine must not start before operator
           // If operator can't start at machineStart, advance candidateTime
@@ -1677,7 +1664,7 @@ function tryJointSlot(
       let bestImbalance = Number.POSITIVE_INFINITY;
 
       for (const op of eligibleOps) {
-        const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration, isLunchSafe);
+        const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration);
         if (opStart < 0) continue;
 
         // HARD CONSTRAINT: only accept operators who can start at machineStart (±5min tolerance)
@@ -1722,7 +1709,7 @@ function tryJointSlot(
       ? operators.filter(o => o.name === preferredOperator)
       : operators;
     for (const op of searchOps) {
-      const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration, isLunchSafe);
+      const opStart = getOperatorEarliestStart(op, machineStart, task.operatorDuration);
       if (opStart >= 0 && opStart < nextOpAvail) {
         nextOpAvail = opStart;
       }
@@ -2378,12 +2365,11 @@ export function buildDailyGanttSchedule({
 
   // Replay assignments to compute operator states — each dose gets its own small T.Homem commit
   const sortedAssignments = [...result.assignments].sort((a, b) => a.operatorStart - b.operatorStart);
-  const lunchSafeSet = new Set(lunchSafeCategories ?? []);
   for (const a of sortedAssignments) {
     if (!a.operatorName || a.operatorStart >= a.operatorEnd) continue;
     const op = operatorStates.find((o) => o.name === a.operatorName);
     if (op) {
-      commitOperator(op, a.operatorStart, a.task.operatorDuration, lunchSafeSet.has(a.task.categoryId));
+      commitOperator(op, a.operatorStart, a.task.operatorDuration);
     }
   }
   for (const op of operatorStates) {
